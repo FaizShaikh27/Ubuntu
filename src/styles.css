@@ -76,6 +76,17 @@
 
 :root {
   --radius: 0.625rem;
+  --term-bg: oklch(0.22 0.078 336);
+  --term-fg: oklch(0.97 0.005 300);
+  --term-green: oklch(0.78 0.17 145);
+  --term-blue: oklch(0.74 0.09 250);
+  --term-red: oklch(0.66 0.2 25);
+  --term-yellow: oklch(0.86 0.16 92);
+  --term-dim: oklch(0.68 0.03 320);
+  --titlebar: oklch(0.31 0.006 320);
+  --titlebar-foreground: oklch(0.93 0.004 300);
+  --orange: oklch(0.65 0.17 45);
+  --orange-foreground: oklch(0.99 0.01 90);
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);
   --card: oklch(1 0 0);
