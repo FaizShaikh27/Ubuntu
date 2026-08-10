@@ -19,6 +19,19 @@
  */
 
 @theme inline {
+  --font-sans: "Ubuntu", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Ubuntu Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  --color-term-bg: var(--term-bg);
+  --color-term-fg: var(--term-fg);
+  --color-term-green: var(--term-green);
+  --color-term-blue: var(--term-blue);
+  --color-term-red: var(--term-red);
+  --color-term-yellow: var(--term-yellow);
+  --color-term-dim: var(--term-dim);
+  --color-titlebar: var(--titlebar);
+  --color-titlebar-foreground: var(--titlebar-foreground);
+  --color-orange: var(--orange);
+  --color-orange-foreground: var(--orange-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
