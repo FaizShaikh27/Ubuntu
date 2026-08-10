@@ -1,22 +1,18 @@
 // Virtual filesystem persisted in browser cache (localStorage).
 
-export type FSFile = { type: "file"; content: string; mode: number; mtime: number };
-export type FSDir = { type: "dir"; children: Record<string, FSNode>; mode: number; mtime: number };
-export type FSNode = FSFile | FSDir;
-
 const STORAGE_KEY = "ubuntu-terminal-fs-v1";
 
 export const HOME = "/home/student";
 
-function dir(children: Record<string, FSNode> = {}): FSDir {
+function dir(children = {}) {
   return { type: "dir", children, mode: 0o755, mtime: Date.now() };
 }
 
-export function file(content = "", mode = 0o644): FSFile {
+export function file(content = "", mode = 0o644) {
   return { type: "file", content, mode, mtime: Date.now() };
 }
 
-function defaultRoot(): FSDir {
+function defaultRoot() {
   return dir({
     bin: dir(),
     boot: dir(),
@@ -93,18 +89,16 @@ function defaultRoot(): FSDir {
 }
 
 export class VFS {
-  root: FSDir;
-
   constructor() {
     this.root = this.load();
   }
 
-  private load(): FSDir {
+  load() {
     if (typeof window === "undefined") return defaultRoot();
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as FSDir;
+        const parsed = JSON.parse(raw);
         if (parsed && parsed.type === "dir") return parsed;
       }
     } catch {
@@ -127,11 +121,11 @@ export class VFS {
     this.persist();
   }
 
-  normalize(path: string, cwd: string): string {
+  normalize(path, cwd) {
     let p = path;
     if (!p.startsWith("/")) p = cwd.replace(/\/$/, "") + "/" + p;
     const parts = p.split("/");
-    const out: string[] = [];
+    const out = [];
     for (const part of parts) {
       if (part === "" || part === ".") continue;
       if (part === "..") {
@@ -143,20 +137,20 @@ export class VFS {
     return "/" + out.join("/");
   }
 
-  lookup(abs: string): FSNode | null {
+  lookup(abs) {
     if (abs === "/") return this.root;
     const parts = abs.split("/").filter(Boolean);
-    let node: FSNode = this.root;
+    let node = this.root;
     for (const part of parts) {
       if (node.type !== "dir") return null;
-      const next: FSNode | undefined = node.children[part];
+      const next = node.children[part];
       if (!next) return null;
       node = next;
     }
     return node;
   }
 
-  parentOf(abs: string): { parent: FSDir | null; name: string } {
+  parentOf(abs) {
     const parts = abs.split("/").filter(Boolean);
     const name = parts.pop() ?? "";
     const parentPath = "/" + parts.join("/");
@@ -164,20 +158,20 @@ export class VFS {
     return { parent: parent && parent.type === "dir" ? parent : null, name };
   }
 
-  isDir(abs: string): boolean {
+  isDir(abs) {
     return this.lookup(abs)?.type === "dir";
   }
 
-  isFile(abs: string): boolean {
+  isFile(abs) {
     return this.lookup(abs)?.type === "file";
   }
 
-  readFile(abs: string): string | null {
+  readFile(abs) {
     const node = this.lookup(abs);
     return node && node.type === "file" ? node.content : null;
   }
 
-  writeFile(abs: string, content: string, mode?: number): string | null {
+  writeFile(abs, content, mode) {
     const { parent, name } = this.parentOf(abs);
     if (!parent) return `cannot create '${abs}': No such file or directory`;
     const existing = parent.children[name];
@@ -193,12 +187,12 @@ export class VFS {
     return null;
   }
 
-  appendFile(abs: string, content: string): string | null {
+  appendFile(abs, content) {
     const prev = this.readFile(abs) ?? "";
     return this.writeFile(abs, prev + content);
   }
 
-  mkdir(abs: string, parents = false): string | null {
+  mkdir(abs, parents = false) {
     if (this.lookup(abs)) {
       if (parents) return null;
       return `cannot create directory '${abs}': File exists`;
@@ -216,7 +210,7 @@ export class VFS {
     return null;
   }
 
-  remove(abs: string, recursive = false): string | null {
+  remove(abs, recursive = false) {
     const node = this.lookup(abs);
     if (!node) return `cannot remove '${abs}': No such file or directory`;
     if (node.type === "dir" && !recursive && Object.keys(node.children).length > 0)
@@ -231,18 +225,18 @@ export class VFS {
     return null;
   }
 
-  list(abs: string): string[] {
+  list(abs) {
     const node = this.lookup(abs);
     if (!node) return [];
     if (node.type === "file") return [abs.split("/").pop() ?? abs];
     return Object.keys(node.children).sort((a, b) => a.localeCompare(b));
   }
 
-  copy(src: string, dest: string, recursive = false): string | null {
+  copy(src, dest, recursive = false) {
     const node = this.lookup(src);
     if (!node) return `cannot stat '${src}': No such file or directory`;
     if (node.type === "dir" && !recursive) return `-r not specified; omitting directory '${src}'`;
-    const clone: FSNode = JSON.parse(JSON.stringify(node));
+    const clone = JSON.parse(JSON.stringify(node));
     const { parent, name } = this.parentOf(dest);
     if (!parent) return `cannot create '${dest}': No such file or directory`;
     parent.children[name] = clone;
@@ -250,13 +244,13 @@ export class VFS {
     return null;
   }
 
-  move(src: string, dest: string): string | null {
+  move(src, dest) {
     const err = this.copy(src, dest, true);
     if (err) return err;
     return this.remove(src, true);
   }
 
-  chmod(abs: string, mode: number): string | null {
+  chmod(abs, mode) {
     const node = this.lookup(abs);
     if (!node) return `cannot access '${abs}': No such file or directory`;
     node.mode = mode;
@@ -264,7 +258,7 @@ export class VFS {
     return null;
   }
 
-  walk(abs: string, out: string[] = []): string[] {
+  walk(abs, out = []) {
     const node = this.lookup(abs);
     if (!node) return out;
     out.push(abs);
@@ -277,9 +271,9 @@ export class VFS {
   }
 }
 
-export function modeString(node: FSNode): string {
+export function modeString(node) {
   const perms = node.mode & 0o777;
-  const rwx = (bits: number) =>
+  const rwx = (bits) =>
     (bits & 4 ? "r" : "-") + (bits & 2 ? "w" : "-") + (bits & 1 ? "x" : "-");
   return (
     (node.type === "dir" ? "d" : "-") +
@@ -289,9 +283,9 @@ export function modeString(node: FSNode): string {
   );
 }
 
-export function shortDate(ms: number): string {
+export function shortDate(ms) {
   const d = new Date(ms);
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const pad = (n) => String(n).padStart(2, "0");
   return `${months[d.getMonth()]} ${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

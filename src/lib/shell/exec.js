@@ -1,30 +1,29 @@
-import { CInterpreter } from "./minic";
-import { execNode, parse } from "./interpreter";
-import type { CmdIO, ShellCtx } from "./types";
+import { CInterpreter } from "./minic.js";
+import { execNode, parse } from "./interpreter.js";
 
 export const BINARY_MAGIC = "\u007fELF\u0002MINIC-C\n";
 
-export function makeBinary(source: string): string {
+export function makeBinary(source) {
   return BINARY_MAGIC + source;
 }
 
-export async function runScript(source: string, io: CmdIO, ctx: ShellCtx): Promise<number> {
+export async function runScript(source, io, ctx) {
   const saved = { ...ctx.vars };
   io.args.slice(1).forEach((a, i) => (ctx.vars[String(i + 1)] = a));
   ctx.vars["#"] = String(io.args.length - 1);
   ctx.vars["@"] = io.args.slice(1).join(" ");
-  ctx.vars["0"] = io.args[0]!;
+  ctx.vars["0"] = io.args[0];
   try {
     return await execNode(parse(source), ctx, { out: io.out, err: io.err, stdin: io.stdin });
   } catch (e) {
-    io.err(`bash: ${(e as Error).message}\n`);
+    io.err(`bash: ${e.message}\n`);
     return 2;
   } finally {
     ctx.vars = { ...saved };
   }
 }
 
-export async function runExecutable(path: string, io: CmdIO, ctx: ShellCtx): Promise<number> {
+export async function runExecutable(path, io, ctx) {
   const abs = ctx.fs.normalize(path, ctx.cwd);
   const node = ctx.fs.lookup(abs);
   if (!node) {
@@ -45,7 +44,7 @@ export async function runExecutable(path: string, io: CmdIO, ctx: ShellCtx): Pro
     try {
       interp.load(content.slice(BINARY_MAGIC.length));
     } catch (e) {
-      io.err(`Segmentation fault (${(e as Error).message})\n`);
+      io.err(`Segmentation fault (${e.message})\n`);
       return 139;
     }
     return interp.run(io.args);

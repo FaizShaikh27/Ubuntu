@@ -1,9 +1,8 @@
-import { HOME, VFS } from "./fs";
-import type { ShellCtx, ShellHost } from "./types";
+import { HOME, VFS } from "./fs.js";
 
-export function createSession(host: ShellHost): ShellCtx {
+export function createSession(host) {
   const fs = new VFS();
-  const vars: Record<string, string> = {
+  const vars = {
     HOME,
     PWD: HOME,
     OLDPWD: HOME,
@@ -33,7 +32,7 @@ export function createSession(host: ShellHost): ShellCtx {
   };
 }
 
-export function displayPath(cwd: string): string {
+export function displayPath(cwd) {
   if (cwd === HOME) return "~";
   if (cwd.startsWith(HOME + "/")) return "~" + cwd.slice(HOME.length);
   return cwd;

@@ -1,13 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { runCommandLine } from "@/lib/shell/interpreter";
-import { commands } from "@/lib/shell/commands";
-import { createSession, displayPath } from "@/lib/shell/session";
-import type { ShellCtx } from "@/lib/shell/types";
+"use client";
 
-type Block =
-  | { kind: "prompt"; path: string; command: string }
-  | { kind: "out"; text: string }
-  | { kind: "err"; text: string };
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { runCommandLine } from "@/src/lib/shell/interpreter.js";
+import { commands } from "@/src/lib/shell/commands.js";
+import { createSession, displayPath } from "@/src/lib/shell/session.js";
 
 const BANNER = [
   "Welcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-generic x86_64)",
@@ -21,22 +17,22 @@ const BANNER = [
 ].join("\n");
 
 export function UbuntuTerminal() {
-  const [blocks, setBlocks] = useState<Block[]>([{ kind: "out", text: BANNER }]);
+  const [blocks, setBlocks] = useState([{ kind: "out", text: BANNER }]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [closed, setClosed] = useState(false);
   const [vmOpen, setVmOpen] = useState(false);
-  const [editor, setEditor] = useState<{ path: string; text: string } | null>(null);
-  const [histIndex, setHistIndex] = useState<number | null>(null);
+  const [editor, setEditor] = useState(null);
+  const [histIndex, setHistIndex] = useState(null);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const readResolver = useRef<((line: string | null) => void) | null>(null);
-  const ctxRef = useRef<ShellCtx | null>(null);
+  const scrollRef = useRef(null);
+  const inputRef = useRef(null);
+  const readResolver = useRef(null);
+  const ctxRef = useRef(null);
   const [cwdLabel, setCwdLabel] = useState("~");
 
-  const append = useCallback((block: Block) => {
+  const append = useCallback((block) => {
     setBlocks((prev) => {
       const last = prev[prev.length - 1];
       if (last && last.kind === block.kind && block.kind !== "prompt" && last.kind !== "prompt") {
@@ -51,7 +47,7 @@ export function UbuntuTerminal() {
     const session = createSession({
       write: (text) => append({ kind: "out", text }),
       readLine: () =>
-        new Promise<string | null>((resolve) => {
+        new Promise((resolve) => {
           setReading(true);
           readResolver.current = resolve;
           requestAnimationFrame(() => inputRef.current?.focus());
@@ -69,8 +65,8 @@ export function UbuntuTerminal() {
   }, [blocks, input, busy]);
 
   useEffect(() => {
-    const onEdit = (event: Event) => {
-      const path = (event as CustomEvent<{ path: string }>).detail.path;
+    const onEdit = (event) => {
+      const path = event.detail.path;
       setEditor({ path, text: ctx.fs.readFile(path) ?? "" });
     };
     window.addEventListener("ubuntu-terminal-edit", onEdit);
@@ -78,7 +74,7 @@ export function UbuntuTerminal() {
   }, [ctx]);
 
   const submit = useCallback(
-    async (line: string) => {
+    async (line) => {
       if (reading && readResolver.current) {
         append({ kind: "out", text: line + "\n" });
         const resolve = readResolver.current;
@@ -111,7 +107,7 @@ export function UbuntuTerminal() {
     const parts = input.split(/\s+/);
     const word = parts[parts.length - 1] ?? "";
     const isFirst = parts.length === 1;
-    let candidates: string[];
+    let candidates;
     if (isFirst) {
       candidates = Object.keys(commands).filter((c) => c.startsWith(word));
     } else {
@@ -125,8 +121,8 @@ export function UbuntuTerminal() {
         .map((n) => prefix + n);
     }
     if (candidates.length === 1) {
-      parts[parts.length - 1] = candidates[0]!;
-      const isDir = !isFirst && ctx.fs.isDir(ctx.fs.normalize(candidates[0]!, ctx.cwd));
+      parts[parts.length - 1] = candidates[0];
+      const isDir = !isFirst && ctx.fs.isDir(ctx.fs.normalize(candidates[0], ctx.cwd));
       setInput(parts.join(" ") + (isDir ? "/" : " "));
     } else if (candidates.length > 1) {
       append({ kind: "prompt", path: displayPath(ctx.cwd), command: input });
@@ -134,7 +130,7 @@ export function UbuntuTerminal() {
     }
   }, [append, ctx, input]);
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       void submit(input);
@@ -273,28 +269,17 @@ export function UbuntuTerminal() {
             value={editor.text}
             onChange={(e) => setEditor({ ...editor, text: e.target.value })}
             onKeyDown={(e) => {
-              if (e.ctrlKey && e.key.toLowerCase() === "s") {
-                e.preventDefault();
-                saveEditor();
-              }
+              if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveEditor(); }
               if (e.key === "Escape") setEditor(null);
             }}
             className="flex-1 resize-none rounded-md border border-term-fg/20 bg-term-bg p-3 text-[15px] outline-none"
             spellCheck={false}
           />
           <div className="mt-2 flex gap-2 font-sans text-sm">
-            <button
-              type="button"
-              onClick={saveEditor}
-              className="rounded-md bg-orange px-3 py-1.5 text-orange-foreground"
-            >
+            <button type="button" onClick={saveEditor} className="rounded-md bg-orange px-3 py-1.5 text-orange-foreground">
               Save (Ctrl+S)
             </button>
-            <button
-              type="button"
-              onClick={() => setEditor(null)}
-              className="rounded-md border border-term-fg/30 px-3 py-1.5"
-            >
+            <button type="button" onClick={() => setEditor(null)} className="rounded-md border border-term-fg/30 px-3 py-1.5">
               Close
             </button>
           </div>
@@ -324,7 +309,7 @@ export function UbuntuTerminal() {
   );
 }
 
-function Prompt({ path }: { path: string }) {
+function Prompt({ path }) {
   return (
     <span>
       <span className="font-bold text-term-green">student@ubuntu</span>

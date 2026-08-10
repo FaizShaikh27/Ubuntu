@@ -1,28 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { UbuntuTerminal } from "@/components/UbuntuTerminal";
+import { UbuntuTerminal } from "@/src/components/UbuntuTerminal";
 
-export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Ubuntu Terminal Online — Practise Linux & gcc in Windows" },
-      {
-        name: "description",
-        content:
-          "A working Ubuntu terminal in your browser: bash scripting, coreutils, gcc compilation and cached files. Built for students without a Linux machine.",
-      },
-      { property: "og:title", content: "Ubuntu Terminal Online — Practise Linux & gcc" },
-      {
-        property: "og:description",
-        content: "Run bash scripts, coreutils and gcc programs in a browser-based Ubuntu terminal. No install needed.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
-  component: Index,
-});
+export const dynamic = "force-dynamic";
 
-function Index() {
+export default function Home() {
   return (
     <main className="min-h-screen bg-background px-4 py-8 font-sans">
       <div className="mx-auto max-w-5xl">
@@ -54,7 +34,7 @@ function Index() {
 
         <p className="mt-6 text-xs text-muted-foreground">
           Need <code className="font-mono">apt</code>, <code className="font-mono">python3</code> or the real
-          compiler toolchain? Run <code className="font-mono">ubuntu-vm</code> or press “Boot full Ubuntu”.
+          compiler toolchain? Run <code className="font-mono">ubuntu-vm</code> or press "Boot full Ubuntu".
         </p>
       </div>
     </main>
