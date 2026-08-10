@@ -2,11 +2,55 @@
  * A compact C interpreter good enough for classroom practicals:
  * variables, arrays, pointers-lite, control flow, functions, printf/scanf,
  * string.h and math.h helpers.
+ *
+ * Extended with full fork()/wait()/getpid()/getppid()/sleep()/exit() simulation
+ * for OS Practical 8 (fork, zombie, orphan processes).
  */
+
+import { globalProcessTable } from "./process-table.js";
 
 const isArray = (v) => typeof v === "object" && v !== null && "__array" in v;
 
-/* ----------------------------- Lexer ----------------------------- */
+/* ------------------------------------------------------------------ */
+/* Header → declared-functions map (suppresses implicit-declaration    */
+/* warnings for functions that ARE declared by the included headers).  */
+/* ------------------------------------------------------------------ */
+
+const HEADER_DECLS = {
+  "stdio.h":    ["printf","fprintf","scanf","fscanf","puts","putchar","getchar","gets","fgets","fflush","perror","sprintf","sscanf"],
+  "stdlib.h":   ["exit","abort","malloc","calloc","realloc","free","atoi","atof","atol","rand","srand","abs"],
+  "string.h":   ["strlen","strcpy","strncpy","strcat","strncat","strcmp","strncmp","strrev","memset","memcpy","memmove","strchr","strstr"],
+  "math.h":     ["sqrt","pow","fabs","floor","ceil","round","sin","cos","tan","asin","acos","atan","atan2","log","log2","log10","exp","fmod"],
+  "unistd.h":   ["fork","getpid","getppid","sleep","usleep","pipe","close","read","write","exec","execl","execv","execvp","dup","dup2","chdir","getcwd"],
+  "sys/types.h":[],
+  "sys/wait.h": ["wait","waitpid","WIFEXITED","WEXITSTATUS","WIFSIGNALED","WTERMSIG"],
+  "time.h":     ["time","clock","difftime","mktime","localtime","gmtime","strftime","ctime"],
+  "ctype.h":    ["isdigit","isalpha","isalnum","isspace","isupper","islower","toupper","tolower","isprint"],
+  "assert.h":   ["assert"],
+  "errno.h":    [],
+  "fcntl.h":    ["open","creat","fcntl"],
+  "signal.h":   ["signal","kill","raise"],
+};
+
+/**
+ * Parse #include directives from C source and return the set of
+ * function names that are considered "declared" (no warning needed).
+ */
+function extractDeclaredFunctions(source) {
+  const declared = new Set();
+  const re = /#include\s*[<"]([^>"]+)[>"]/g;
+  let m;
+  while ((m = re.exec(source)) !== null) {
+    const header = m[1];
+    const fns = HEADER_DECLS[header];
+    if (fns) fns.forEach((f) => declared.add(f));
+  }
+  return declared;
+}
+
+/* ------------------------------------------------------------------ */
+/* Lexer                                                               */
+/* ------------------------------------------------------------------ */
 
 function lex(src) {
   const toks = [];
@@ -20,6 +64,7 @@ function lex(src) {
     if (/\s/.test(c)) { i++; continue; }
     if (c === "/" && src[i + 1] === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
     if (c === "/" && src[i + 1] === "*") { i += 2; while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++; i += 2; continue; }
+    // Skip preprocessor lines (but we already extracted headers above)
     if (c === "#") { while (i < src.length && src[i] !== "\n") i++; continue; }
     if (c === '"') {
       i++; let s = "";
@@ -53,9 +98,11 @@ function unescapeChar(c) {
   return map[c] ?? c;
 }
 
-/* ----------------------------- Parser ---------------------------- */
+/* ------------------------------------------------------------------ */
+/* Parser                                                             */
+/* ------------------------------------------------------------------ */
 
-const TYPES = new Set(["int", "float", "double", "char", "long", "short", "void", "unsigned", "signed", "const"]);
+const TYPES = new Set(["int", "float", "double", "char", "long", "short", "void", "unsigned", "signed", "const", "pid_t", "size_t", "ssize_t", "uint8_t", "uint16_t", "uint32_t", "int8_t", "int16_t", "int32_t"]);
 
 class CParser {
   constructor(toks) { this.toks = toks; this.p = 0; }
@@ -96,7 +143,7 @@ class CParser {
       while (this.eat("*")) type = "ptr";
       const pname = this.peek()?.v ?? "";
       if (this.peek()?.t === "id") this.p++;
-      if (this.eat("[")) { while (!this.is("]")) this.p++; this.expect("]"); type = "ptr"; }
+      if (this.eat("[")) { while (!this.is("]")) this.p++; this.expect("]"); }
       if (pname) params.push({ type, name: pname });
       if (!this.eat(",")) break;
     }
@@ -214,6 +261,8 @@ class CParser {
     let e = this.parsePrimary();
     for (;;) {
       if (this.eat("[")) { const index = this.parseExpr(); this.expect("]"); if (this.eat("[")) { this.parseExpr(); this.expect("]"); } e = { k: "index", base: e, index }; continue; }
+      if (this.eat(".")) { const field = this.peek()?.v ?? ""; this.p++; e = { k: "field", base: e, field }; continue; }
+      if (this.eat("->")) { const field = this.peek()?.v ?? ""; this.p++; e = { k: "field", base: e, field }; continue; }
       const t = this.peek();
       if (t && (t.v === "++" || t.v === "--")) { this.p++; e = { k: "post", op: t.v, e }; continue; }
       break;
@@ -237,7 +286,17 @@ class CParser {
   }
 }
 
-/* --------------------------- Interpreter -------------------------- */
+/* ------------------------------------------------------------------ */
+/* Special signals used to implement fork() dual-run                  */
+/* ------------------------------------------------------------------ */
+
+class ForkSignal {
+  constructor() { this.type = "ForkSignal"; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Interpreter helpers                                                 */
+/* ------------------------------------------------------------------ */
 
 class ReturnValue { constructor(value) { this.value = value; } }
 class BreakErr {}
@@ -270,17 +329,43 @@ function fromString(s, size) {
   return { __array: arr };
 }
 
+/* ------------------------------------------------------------------ */
+/* CInterpreter                                                        */
+/* ------------------------------------------------------------------ */
+
 export class CInterpreter {
-  constructor(io) {
+  /**
+   * @param {object} io   { out, err, readLine }
+   * @param {object} opts { pid, ppid, processTable, forkMode, forkChildPid, execName }
+   */
+  constructor(io, opts = {}) {
     this.io = io;
     this.funcs = new Map();
     this.globals = {};
     this.scopes = [];
     this.inputBuffer = [];
     this.steps = 0;
+
+    // Process identity
+    this.processTable = opts.processTable ?? globalProcessTable;
+    this.pid  = opts.pid  ?? 1001;
+    this.ppid = opts.ppid ?? 1;
+    this.execName = opts.execName ?? "a.out";
+
+    // Fork dual-run state:
+    //   null    → first encounter of fork(); throws ForkSignal
+    //   'child' → fork() returns 0
+    //   'parent'→ fork() returns this.forkChildPid
+    this.forkMode     = opts.forkMode     ?? null;
+    this.forkChildPid = opts.forkChildPid ?? 0;
+    this.forkCallCount = 0; // which fork() call we're simulating (for multi-fork programs)
+
+    // Set of function names declared by the program's headers (no warning needed)
+    this.declaredFunctions = new Set();
   }
 
   load(source) {
+    this.declaredFunctions = extractDeclaredFunctions(source);
     const parser = new CParser(lex(source));
     for (const f of parser.parseProgram()) this.funcs.set(f.name, f);
   }
@@ -288,13 +373,113 @@ export class CInterpreter {
   async run(args) {
     const main = this.funcs.get("main");
     if (!main) { this.io.err("/usr/bin/ld: undefined reference to `main'\n"); return 1; }
+    const argv = { __array: args.map((a) => a) };
+
+    // ----------------------------------------------------------------
+    // Normal (non-fork) execution
+    // ----------------------------------------------------------------
+    if (this.forkMode !== null) {
+      // This is a child or parent re-run — just execute directly
+      try {
+        const result = await this.callFunction(main, [args.length, argv]);
+        return toNum(result) & 0xff;
+      } catch (e) {
+        if (e instanceof ReturnValue) return toNum(e.value) & 0xff;
+        if (!(e instanceof ForkSignal)) {
+          this.io.err(`runtime error: ${e.message}\n`);
+          return 1;
+        }
+        return 0;
+      } finally {
+        // Clean up this process from the table when it finishes
+        this.processTable.markZombie(this.pid, 0);
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // First run — may hit a ForkSignal
+    // ----------------------------------------------------------------
     try {
-      const argv = { __array: args.map((a) => a) };
       const result = await this.callFunction(main, [args.length, argv]);
+      // No fork() was called — clean up normally
+      this.processTable.remove(this.pid);
       return toNum(result) & 0xff;
     } catch (e) {
-      if (e instanceof ReturnValue) return toNum(e.value) & 0xff;
+      if (e instanceof ReturnValue) {
+        this.processTable.remove(this.pid);
+        return toNum(e.value) & 0xff;
+      }
+      if (e instanceof ForkSignal) {
+        // ---- Dual-run fork simulation ----
+        return this._runFork(main, args, argv);
+      }
       this.io.err(`runtime error: ${e.message}\n`);
+      this.processTable.remove(this.pid);
+      return 1;
+    }
+  }
+
+  /**
+   * Orchestrate the child run followed by the parent run after fork().
+   */
+  async _runFork(main, args, argv) {
+    // Allocate child PID
+    const childPid = this.processTable.alloc(this.pid, this.execName);
+
+    // ---- Child run ----
+    const childInterp = new CInterpreter(this.io, {
+      processTable: this.processTable,
+      pid:          childPid,
+      ppid:         this.pid,
+      forkMode:     "child",
+      forkChildPid: 0,
+      execName:     this.execName,
+    });
+    // Share parsed functions and a copy of globals
+    childInterp.funcs = this.funcs;
+    childInterp.declaredFunctions = this.declaredFunctions;
+    childInterp.globals = { ...this.globals };
+
+    try {
+      const childArgv = { __array: args.map((a) => a) };
+      await childInterp.callFunction(main, [args.length, childArgv]);
+    } catch (childErr) {
+      if (childErr instanceof ReturnValue) {
+        // Child exited via return — mark zombie if parent hasn't waited yet
+        this.processTable.markZombie(childPid, toNum(childErr.value));
+      } else if (!(childErr instanceof ForkSignal)) {
+        // Unexpected error in child
+        this.io.err(`child process error: ${childErr.message}\n`);
+        this.processTable.markZombie(childPid, 1);
+      }
+    }
+    // If child didn't throw ReturnValue, it fell off the end — exit(0)
+    if (this.processTable.procs.get(childPid)?.state === "R") {
+      this.processTable.markZombie(childPid, 0);
+    }
+
+    // ---- Parent run ----
+    // Reset state for re-execution as parent
+    this.scopes = [];
+    this.globals = {};
+    this.inputBuffer = [];
+    this.steps = 0;
+    this.forkMode = "parent";
+    this.forkChildPid = childPid;
+    this.forkCallCount = 0;
+
+    try {
+      const parentArgv = { __array: args.map((a) => a) };
+      const result = await this.callFunction(main, [args.length, parentArgv]);
+      this.processTable.remove(this.pid);
+      return toNum(result) & 0xff;
+    } catch (parentErr) {
+      if (parentErr instanceof ReturnValue) {
+        this.processTable.remove(this.pid);
+        return toNum(parentErr.value) & 0xff;
+      }
+      this.io.err(`runtime error: ${parentErr.message}\n`);
+      this.processTable.remove(this.pid);
       return 1;
     }
   }
@@ -376,6 +561,7 @@ export class CInterpreter {
       case "num": return e.v;
       case "str": return e.v;
       case "var": return this.getVar(e.name);
+      case "field": return 0; // struct fields not fully supported
       case "index": { const base = await this.eval(e.base); const idx = toNum(await this.eval(e.index)); if (isArray(base)) return base.__array[idx] ?? 0; if (typeof base === "string") return base.charCodeAt(idx) || 0; return 0; }
       case "cond": return toNum(await this.eval(e.c)) ? this.eval(e.a) : this.eval(e.b);
       case "un": {
@@ -422,8 +608,56 @@ export class CInterpreter {
   }
 
   async callByName(name, argExprs) {
+    // User-defined functions take priority
     const user = this.funcs.get(name);
     if (user) { const args = []; for (const a of argExprs) args.push(await this.eval(a)); return this.callFunction(user, args); }
+
+    // ----------------------------------------------------------------
+    // Process simulation syscalls (Practical 8)
+    // ----------------------------------------------------------------
+
+    if (name === "fork") {
+      if (this.forkMode === "child") {
+        // We're in the child re-run — return 0
+        return 0;
+      }
+      if (this.forkMode === "parent") {
+        // We're in the parent re-run — return the child PID
+        return this.forkChildPid;
+      }
+      // First encounter — throw ForkSignal to trigger dual-run
+      throw new ForkSignal();
+    }
+
+    if (name === "getpid") {
+      return this.pid;
+    }
+
+    if (name === "getppid") {
+      // Look up live ppid from process table (supports orphan re-parenting)
+      const entry = this.processTable.procs.get(this.pid);
+      return entry ? entry.ppid : this.ppid;
+    }
+
+    if (name === "wait" || name === "waitpid") {
+      // Reap a zombie child
+      const reaped = this.processTable.reap(this.pid);
+      if (reaped > 0) {
+        // Zero out the status pointer argument if provided (wait(NULL) is common)
+        // No-op since we can't write to a C pointer in this simulator
+      }
+      return reaped; // returns child PID on success, -1 if none
+    }
+
+    if (name === "perror") {
+      const msg = toStr(await this.eval(argExprs[0]));
+      this.io.err(`${msg}: Success\n`);
+      return 0;
+    }
+
+    // ----------------------------------------------------------------
+    // stdio
+    // ----------------------------------------------------------------
 
     if (name === "printf" || name === "fprintf") {
       const exprs = name === "fprintf" ? argExprs.slice(1) : argExprs;
@@ -455,33 +689,89 @@ export class CInterpreter {
     }
     if (name === "gets" || name === "fgets") { const line = (await this.io.readLine()) ?? ""; const dest = argExprs[0]; await this.assignTo(dest.k === "un" && dest.op === "&" ? dest.e : dest, fromString(line)); return 1; }
     if (name === "getchar") { const t = await this.nextInputToken(); return t.charCodeAt(0) || 0; }
+    if (name === "fflush") { return 0; }
 
+    // ----------------------------------------------------------------
+    // Evaluate remaining args for built-ins that need them
+    // ----------------------------------------------------------------
     const args = []; for (const a of argExprs) args.push(await this.eval(a));
     const n0 = toNum(args[0]); const n1 = toNum(args[1]);
+
     switch (name) {
+      // string.h
       case "strlen": return toStr(args[0]).length;
       case "strcpy": return this.assignTo(argExprs[0], fromString(toStr(args[1])));
+      case "strncpy": return this.assignTo(argExprs[0], fromString(toStr(args[1]).slice(0, n1)));
       case "strcat": return this.assignTo(argExprs[0], fromString(toStr(args[0]) + toStr(args[1])));
       case "strcmp": return toStr(args[0]) < toStr(args[1]) ? -1 : toStr(args[0]) > toStr(args[1]) ? 1 : 0;
       case "strrev": return this.assignTo(argExprs[0], fromString([...toStr(args[0])].reverse().join("")));
+      case "memset": if (isArray(args[0])) { args[0].__array.fill(n1); } return args[0];
+      // math.h
       case "sqrt": return Math.sqrt(n0); case "pow": return Math.pow(n0, n1);
       case "abs": case "fabs": return Math.abs(n0);
       case "floor": return Math.floor(n0); case "ceil": return Math.ceil(n0); case "round": return Math.round(n0);
       case "sin": return Math.sin(n0); case "cos": return Math.cos(n0); case "tan": return Math.tan(n0);
-      case "log": return Math.log(n0); case "log10": return Math.log10(n0); case "exp": return Math.exp(n0);
+      case "log": return Math.log(n0); case "log2": return Math.log2(n0); case "log10": return Math.log10(n0); case "exp": return Math.exp(n0);
+      // stdlib.h
       case "rand": return Math.floor(Math.random() * 32768); case "srand": return 0;
       case "atoi": return Math.trunc(Number(toStr(args[0]))) || 0; case "atof": return Number(toStr(args[0])) || 0;
+      case "malloc": case "calloc": return { __array: new Array(Math.max(0, n0)).fill(0) };
+      case "free": return 0;
+      // ctype.h
       case "toupper": return String.fromCharCode(n0).toUpperCase().charCodeAt(0);
       case "tolower": return String.fromCharCode(n0).toLowerCase().charCodeAt(0);
       case "isdigit": return /[0-9]/.test(String.fromCharCode(n0)) ? 1 : 0;
       case "isalpha": return /[a-zA-Z]/.test(String.fromCharCode(n0)) ? 1 : 0;
-      case "malloc": case "calloc": return { __array: new Array(Math.max(0, n0)).fill(0) };
-      case "free": case "fflush": case "sleep": return 0;
-      case "exit": throw new ReturnValue(n0);
-      default: this.io.err(`warning: implicit declaration of function '${name}'\n`); return 0;
+      case "isalnum": return /[a-zA-Z0-9]/.test(String.fromCharCode(n0)) ? 1 : 0;
+      case "isspace": return /\s/.test(String.fromCharCode(n0)) ? 1 : 0;
+      case "isupper": return /[A-Z]/.test(String.fromCharCode(n0)) ? 1 : 0;
+      case "islower": return /[a-z]/.test(String.fromCharCode(n0)) ? 1 : 0;
+      case "isprint": return n0 >= 32 && n0 < 127 ? 1 : 0;
+      // sleep — update process state, then briefly yield
+      case "sleep": {
+        const requestedSecs = n0;
+        // Cap at 2 seconds for classroom convenience
+        const actualMs = Math.min(requestedSecs * 1000, 2000);
+        this.processTable.markSleeping(this.pid);
+        if (actualMs > 0) {
+          await new Promise((r) => setTimeout(r, actualMs));
+        }
+        this.processTable.markRunning(this.pid);
+        return 0;
+      }
+      case "usleep": {
+        const us = n0;
+        const ms = Math.min(Math.floor(us / 1000), 2000);
+        this.processTable.markSleeping(this.pid);
+        if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+        this.processTable.markRunning(this.pid);
+        return 0;
+      }
+      // exit — mark zombie then throw
+      case "exit": case "abort": {
+        const status = name === "abort" ? 134 : n0;
+        this.processTable.markZombie(this.pid, status);
+        throw new ReturnValue(status);
+      }
+      // WIFEXITED / WEXITSTATUS macros (simplified)
+      case "WIFEXITED": return 1;
+      case "WEXITSTATUS": return n0 & 0xff;
+      case "WIFSIGNALED": return 0;
+      case "WTERMSIG": return 0;
+      default: {
+        // Only warn for truly undeclared functions
+        if (!this.declaredFunctions.has(name)) {
+          this.io.err(`warning: implicit declaration of function '${name}'\n`);
+        }
+        return 0;
+      }
     }
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* printf format string formatter                                      */
+/* ------------------------------------------------------------------ */
 
 export function formatC(fmt, args) {
   let out = ""; let ai = 0;
@@ -519,6 +809,10 @@ export function formatC(fmt, args) {
   }
   return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Syntax check (used by gcc command in commands.js)                  */
+/* ------------------------------------------------------------------ */
 
 /** Very light syntax check, mimicking common gcc diagnostics. */
 export function checkC(source, filename) {

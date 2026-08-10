@@ -5,18 +5,34 @@ import { runCommandLine } from "@/src/lib/shell/interpreter.js";
 import { commands } from "@/src/lib/shell/commands.js";
 import { createSession, displayPath } from "@/src/lib/shell/session.js";
 
-const BANNER = [
-  "Welcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-generic x86_64)",
-  "",
-  " * Documentation:  type `help` to list every available command",
-  " * Practicals:     bash scripting, coreutils and gcc all work offline",
-  " * Storage:        files you create are cached in this browser",
-  "",
-  "Last login: " + new Date().toString().replace(/GMT.*/, "") + "on pts/0",
-  "",
-].join("\n");
+function makeBanner(terminalId) {
+  const lines = [
+    "Welcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-generic x86_64)",
+    "",
+    ` * Documentation:  type \`help\` to list every available command`,
+    ` * Practicals:     bash scripting, coreutils and gcc all work offline`,
+    ` * Storage:        files you create are cached in this browser`,
+    "",
+    `Last login: ${new Date().toString().replace(/GMT.*/, "")}on pts/${terminalId}`,
+    "",
+  ];
+  return lines.join("\n");
+}
 
-export function UbuntuTerminal() {
+/**
+ * UbuntuTerminal
+ *
+ * Props:
+ *   sharedFs   — optional VFS instance; if provided, this terminal shares
+ *                the filesystem with other terminals (for split view).
+ *   label      — display label shown in the title bar (e.g. "Terminal 1")
+ *   instanceId — numeric ID used for the welcome banner (0 = first terminal)
+ *   onClose    — callback fired when the user closes this pane (split mode)
+ *   showClose  — whether to show the close (×) button
+ */
+export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, onClose = null, showClose = false }) {
+  const BANNER = useMemo(() => makeBanner(instanceId), [instanceId]);
+
   const [blocks, setBlocks] = useState([{ kind: "out", text: BANNER }]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,13 +61,17 @@ export function UbuntuTerminal() {
 
   // eslint-disable-next-line react-hooks/refs
   const [ctx] = useState(() =>
-    createSession({
-      write: (text) => hostRef.current?.write(text),
-      readLine: () => hostRef.current?.readLine(),
-      clear: () => hostRef.current?.clear(),
-      bootRealUbuntu: () => hostRef.current?.bootRealUbuntu(),
-      exit: () => hostRef.current?.exit(),
-    })
+    createSession(
+      {
+        write: (text) => hostRef.current?.write(text),
+        readLine: () => hostRef.current?.readLine(),
+        clear: () => hostRef.current?.clear(),
+        bootRealUbuntu: () => hostRef.current?.bootRealUbuntu(),
+        exit: () => hostRef.current?.exit(),
+      },
+      sharedFs,
+      instanceId,
+    )
   );
 
   useEffect(() => {
@@ -76,11 +96,13 @@ export function UbuntuTerminal() {
   useEffect(() => {
     const onEdit = (event) => {
       const path = event.detail.path;
+      // Only handle events targeted at this terminal instance
+      if (event.detail.instanceId !== undefined && event.detail.instanceId !== instanceId) return;
       setEditor({ path, text: ctx.fs.readFile(path) ?? "" });
     };
     window.addEventListener("ubuntu-terminal-edit", onEdit);
     return () => window.removeEventListener("ubuntu-terminal-edit", onEdit);
-  }, [ctx]);
+  }, [ctx, instanceId]);
 
   const submit = useCallback(
     async (line) => {
@@ -199,9 +221,14 @@ export function UbuntuTerminal() {
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
+  const titleLabel = label
+    ? `${label} — student@ubuntu: ${cwdLabel}`
+    : `student@ubuntu: ${cwdLabel}`;
+
   return (
-    <div className="overflow-hidden rounded-xl border border-black/40 shadow-2xl">
-      <div className="flex items-center justify-between bg-titlebar px-3 py-2 font-sans text-sm text-titlebar-foreground">
+    <div className="flex flex-col overflow-hidden rounded-xl border border-black/40 shadow-2xl h-full">
+      {/* ── Title bar ── */}
+      <div className="flex items-center justify-between bg-titlebar px-3 py-2 font-sans text-sm text-titlebar-foreground flex-shrink-0">
         <div className="flex items-center gap-2">
           <span className="flex gap-1.5">
             <span className="size-3 rounded-full bg-term-red/90" />
@@ -209,20 +236,33 @@ export function UbuntuTerminal() {
             <span className="size-3 rounded-full bg-term-green/90" />
           </span>
         </div>
-        <span className="truncate font-medium">student@ubuntu: {cwdLabel}</span>
-        <button
-          type="button"
-          onClick={() => setVmOpen(true)}
-          className="rounded-md bg-orange px-2.5 py-1 text-xs font-medium text-orange-foreground transition-opacity hover:opacity-90"
-        >
-          Boot full Ubuntu
-        </button>
+        <span className="truncate font-medium">{titleLabel}</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setVmOpen(true)}
+            className="rounded-md bg-orange px-2.5 py-1 text-xs font-medium text-orange-foreground transition-opacity hover:opacity-90"
+          >
+            Boot full Ubuntu
+          </button>
+          {showClose && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              title="Close terminal"
+              className="rounded-md border border-titlebar-foreground/30 px-2 py-1 text-xs font-medium transition-opacity hover:opacity-90 hover:bg-term-red/20"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* ── Output area ── */}
       <div
         ref={scrollRef}
         onClick={() => inputRef.current?.focus()}
-        className="h-[70vh] min-h-[420px] overflow-y-auto bg-term-bg px-3 py-2 font-mono text-[15px] leading-[1.35] text-term-fg selection:bg-term-fg/25"
+        className="flex-1 min-h-0 overflow-y-auto bg-term-bg px-3 py-2 font-mono text-[14px] leading-[1.35] text-term-fg selection:bg-term-fg/25"
       >
         {blocks.map((block, i) =>
           block.kind === "prompt" ? (
@@ -254,21 +294,22 @@ export function UbuntuTerminal() {
             <textarea
               ref={inputRef}
               value={input}
-              autoFocus
+              autoFocus={instanceId === 0}
               spellCheck={false}
               autoCapitalize="none"
               autoCorrect="off"
               onChange={(e) => setInput(e.target.value.replace(/\n/g, ""))}
               onKeyDown={onKeyDown}
               className="absolute h-px w-px resize-none opacity-0"
-              aria-label="Terminal input"
+              aria-label={`Terminal ${instanceId + 1} input`}
             />
           </div>
         )}
       </div>
 
+      {/* ── nano editor overlay ── */}
       {editor && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-term-bg/95 p-4 font-mono text-term-fg backdrop-blur">
+        <div className="absolute inset-0 z-50 flex flex-col bg-term-bg/95 p-4 font-mono text-term-fg backdrop-blur rounded-xl">
           <div className="mb-2 flex items-center justify-between font-sans text-sm">
             <span>GNU nano — {editor.path}</span>
             <span className="text-term-dim">Ctrl+S / Save · Esc / Exit</span>
@@ -281,7 +322,7 @@ export function UbuntuTerminal() {
               if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveEditor(); }
               if (e.key === "Escape") setEditor(null);
             }}
-            className="flex-1 resize-none rounded-md border border-term-fg/20 bg-term-bg p-3 text-[15px] outline-none"
+            className="flex-1 resize-none rounded-md border border-term-fg/20 bg-term-bg p-3 text-[14px] outline-none"
             spellCheck={false}
           />
           <div className="mt-2 flex gap-2 font-sans text-sm">
@@ -295,6 +336,7 @@ export function UbuntuTerminal() {
         </div>
       )}
 
+      {/* ── Full Ubuntu VM overlay ── */}
       {vmOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-titlebar">
           <div className="flex items-center justify-between px-3 py-2 font-sans text-sm text-titlebar-foreground">

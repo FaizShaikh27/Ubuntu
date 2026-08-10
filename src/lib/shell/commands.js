@@ -2,6 +2,7 @@ import { HOME, modeString, shortDate } from "./fs.js";
 import { evalArith, matchGlob, BreakSignal, ContinueSignal, ReturnSignal } from "./interpreter.js";
 import { makeBinary, runScript } from "./exec.js";
 import { checkC } from "./minic.js";
+import { globalProcessTable } from "./process-table.js";
 
 const abs = (ctx, p) => ctx.fs.normalize(p, ctx.cwd);
 
@@ -499,7 +500,38 @@ export const commands = {
     return 0;
   },
   uptime: (io) => { io.out(` ${new Date().toTimeString().slice(0, 8)} up 1:12,  1 user,  load average: 0.08, 0.03, 0.01\n`); return 0; },
-  ps: (io) => { io.out(["    PID TTY          TIME CMD", "   1024 pts/0    00:00:00 bash", "   1099 pts/0    00:00:00 ps", ""].join("\n")); return 0; },
+  ps: (io) => {
+    const { flags } = splitFlags(io.args.slice(1));
+    const procs = globalProcessTable.snapshot();
+    // Always include a bash entry for the shell itself
+    const hasBash = procs.some((p) => p.name === "bash");
+    const bashEntry = hasBash ? [] : [{ pid: 1024, ppid: 1, state: "S", name: "bash", cmd: "bash" }];
+    const allProcs = [...bashEntry, ...procs.filter((p) => p.pid !== 1)];
+
+    if (flags.has("e") || flags.has("l")) {
+      // ps -el extended format: F S UID PID PPID ... CMD
+      const header = "F S   UID     PID    PPID  C PRI  NI ADDR SZ WCHAN TTY          TIME CMD";
+      const rows = allProcs.map((p) => {
+        const state = p.state ?? "S";
+        const pid   = String(p.pid).padStart(7);
+        const ppid  = String(p.ppid).padStart(7);
+        const cmd   = p.cmd ?? p.name ?? "?";
+        return `4 ${state}  1000${pid}${ppid}  0  80   0 -  1234 -      pts/0    00:00:00 ${cmd}`;
+      });
+      io.out([header, ...rows, ""].join("\n"));
+    } else {
+      // ps basic format
+      const header = "    PID TTY          TIME CMD";
+      const rows = allProcs.map((p) => {
+        const pid = String(p.pid).padStart(7);
+        const cmd = p.cmd ?? p.name ?? "?";
+        const state = p.state === "Z" ? " <defunct>" : "";
+        return `${pid} pts/0    00:00:00 ${cmd}${state}`;
+      });
+      io.out([header, ...rows, ""].join("\n"));
+    }
+    return 0;
+  },
   top: (io) => { io.out("top: this build is non-interactive; use `ps` instead.\n"); return 0; },
   clear: (_io, ctx) => { ctx.host.clear(); return 0; },
   sleep: async (io) => { const secs = Math.min(Number(io.args[1]) || 0, 10); await new Promise((r) => setTimeout(r, secs * 1000)); return 0; },
@@ -627,7 +659,7 @@ function openEditor(io, ctx, name) {
   if (!target) { io.err(`${name}: please give a filename, e.g. ${name} script.sh\n`); return 1; }
   const path = abs(ctx, target);
   if (!ctx.fs.lookup(path)) ctx.fs.writeFile(path, "");
-  window.dispatchEvent(new CustomEvent("ubuntu-terminal-edit", { detail: { path } }));
+  window.dispatchEvent(new CustomEvent("ubuntu-terminal-edit", { detail: { path, instanceId: ctx.instanceId ?? 0 } }));
   return 0;
 }
 

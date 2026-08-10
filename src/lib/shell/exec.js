@@ -1,5 +1,6 @@
 import { CInterpreter } from "./minic.js";
 import { execNode, parse } from "./interpreter.js";
+import { globalProcessTable } from "./process-table.js";
 
 export const BINARY_MAGIC = "\u007fELF\u0002MINIC-C\n";
 
@@ -40,7 +41,25 @@ export async function runExecutable(path, io, ctx) {
   }
   const content = node.content;
   if (content.startsWith(BINARY_MAGIC)) {
-    const interp = new CInterpreter({ out: io.out, err: io.err, readLine: io.readLine });
+    // Derive the executable name from the path for ps output
+    const execName = path.split("/").pop() ?? "a.out";
+
+    // Reset the process table for a fresh program run so we don't accumulate
+    // stale entries from previous executions in the same terminal session.
+    globalProcessTable.reset();
+
+    // Allocate a PID for this process (parent = init, PID 1)
+    const pid = globalProcessTable.alloc(1, execName);
+
+    const interp = new CInterpreter(
+      { out: io.out, err: io.err, readLine: io.readLine },
+      {
+        pid,
+        ppid: 1,
+        processTable: globalProcessTable,
+        execName,
+      }
+    );
     try {
       interp.load(content.slice(BINARY_MAGIC.length));
     } catch (e) {

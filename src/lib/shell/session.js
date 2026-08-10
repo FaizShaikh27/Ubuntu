@@ -1,7 +1,7 @@
 import { HOME, VFS } from "./fs.js";
 
-export function createSession(host) {
-  const fs = new VFS();
+export function createSession(host, sharedFs = null, instanceId = 0) {
+  const fs = sharedFs ?? new VFS();
   const vars = {
     HOME,
     PWD: HOME,
@@ -29,6 +29,7 @@ export function createSession(host) {
     status: 0,
     exiting: false,
     host,
+    instanceId,
   };
 }
 
