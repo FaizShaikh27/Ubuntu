@@ -29,7 +29,6 @@ export function UbuntuTerminal() {
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const readResolver = useRef(null);
-  const ctxRef = useRef(null);
   const [cwdLabel, setCwdLabel] = useState("~");
 
   const append = useCallback((block) => {
@@ -42,9 +41,8 @@ export function UbuntuTerminal() {
     });
   }, []);
 
-  const ctx = useMemo(() => {
-    if (ctxRef.current) return ctxRef.current;
-    const session = createSession({
+  const [ctx] = useState(() =>
+    createSession({
       write: (text) => append({ kind: "out", text }),
       readLine: () =>
         new Promise((resolve) => {
@@ -55,10 +53,8 @@ export function UbuntuTerminal() {
       clear: () => setBlocks([]),
       bootRealUbuntu: () => setVmOpen(true),
       exit: () => setClosed(true),
-    });
-    ctxRef.current = session;
-    return session;
-  }, [append]);
+    })
+  );
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -100,7 +96,7 @@ export function UbuntuTerminal() {
       setBusy(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     },
-    [append, ctx, reading],
+    [append, ctx, reading, setCwdLabel],
   );
 
   const complete = useCallback(() => {
