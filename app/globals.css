@@ -20,8 +20,8 @@
  */
 
 @theme inline {
-  --font-sans: "Ubuntu", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Ubuntu Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  --font-sans: var(--font-ubuntu), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-ubuntu-mono), ui-monospace, "DejaVu Sans Mono", monospace;
   --color-term-bg: var(--term-bg);
   --color-term-fg: var(--term-fg);
   --color-term-green: var(--term-green);

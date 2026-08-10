@@ -429,7 +429,6 @@ export function evalArith(expr, ctx) {
   });
   if (!/^[0-9+\-*/%()\<\>=!&| .]*$/.test(replaced)) return 0;
   try {
-    // eslint-disable-next-line no-new-func
     const result = Function(`"use strict"; return (${replaced || 0});`)();
     const num = typeof result === "boolean" ? (result ? 1 : 0) : result;
     return Number.isFinite(num) ? Math.trunc(num) : 0;

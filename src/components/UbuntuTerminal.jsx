@@ -41,8 +41,21 @@ export function UbuntuTerminal() {
     });
   }, []);
 
+  const hostRef = useRef(null);
+
+  // eslint-disable-next-line react-hooks/refs
   const [ctx] = useState(() =>
     createSession({
+      write: (text) => hostRef.current?.write(text),
+      readLine: () => hostRef.current?.readLine(),
+      clear: () => hostRef.current?.clear(),
+      bootRealUbuntu: () => hostRef.current?.bootRealUbuntu(),
+      exit: () => hostRef.current?.exit(),
+    })
+  );
+
+  useEffect(() => {
+    hostRef.current = {
       write: (text) => append({ kind: "out", text }),
       readLine: () =>
         new Promise((resolve) => {
@@ -53,8 +66,8 @@ export function UbuntuTerminal() {
       clear: () => setBlocks([]),
       bootRealUbuntu: () => setVmOpen(true),
       exit: () => setClosed(true),
-    })
-  );
+    };
+  }, [append]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });

@@ -34,7 +34,7 @@ export default function Home() {
 
         <p className="mt-6 text-xs text-muted-foreground">
           Need <code className="font-mono">apt</code>, <code className="font-mono">python3</code> or the real
-          compiler toolchain? Run <code className="font-mono">ubuntu-vm</code> or press "Boot full Ubuntu".
+          compiler toolchain? Run <code className="font-mono">ubuntu-vm</code> or press &quot;Boot full Ubuntu&quot;.
         </p>
       </div>
     </main>

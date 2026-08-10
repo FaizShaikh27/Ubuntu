@@ -1,5 +1,17 @@
-import localFont from "next/font/local";
+import { Ubuntu, Ubuntu_Mono } from "next/font/google";
 import "./globals.css";
+
+const ubuntu = Ubuntu({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-ubuntu",
+});
+
+const ubuntuMono = Ubuntu_Mono({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-ubuntu-mono",
+});
 
 export const metadata = {
   title: "Ubuntu Terminal Online — Practise Linux & gcc in Windows",
@@ -18,20 +30,8 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap"
-        />
-      </head>
-      <body>{children}</body>
+    <html lang="en" className={`${ubuntu.variable} ${ubuntuMono.variable}`}>
+      <body className="antialiased">{children}</body>
     </html>
   );
 }
