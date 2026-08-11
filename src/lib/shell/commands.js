@@ -534,7 +534,7 @@ export const commands = {
   },
   top: (io) => { io.out("top: this build is non-interactive; use `ps` instead.\n"); return 0; },
   clear: (_io, ctx) => { ctx.host.clear(); return 0; },
-  sleep: async (io) => { const secs = Math.min(Number(io.args[1]) || 0, 10); await new Promise((r) => setTimeout(r, secs * 1000)); return 0; },
+  sleep: async (io) => { const secs = Math.max(0, Number(io.args[1]) || 0); await new Promise((r) => setTimeout(r, secs * 1000)); return 0; },
   history: (io, ctx) => { ctx.history.forEach((h, i) => io.out(`${String(i + 1).padStart(5)}  ${h}\n`)); return 0; },
   which: (io, ctx) => {
     let status = 0;

@@ -247,6 +247,18 @@ export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, 
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [append]);
 
+  const handleHardReset = useCallback(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.confirm(
+        "Hard Reset will stop all running processes, erase cached memory & files, and restart the terminal. Continue?"
+      )
+    ) {
+      window.localStorage.clear();
+      window.location.reload();
+    }
+  }, []);
+
   const titleLabel = label
     ? `${label} — student@ubuntu: ${cwdLabel}`
     : `student@ubuntu: ${cwdLabel}`;
@@ -264,6 +276,18 @@ export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, 
         </div>
         <span className="truncate font-medium">{titleLabel}</span>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleHardReset}
+            title="Stop stuck processes/infinite loops and erase memory"
+            className="rounded-md border border-term-red/60 bg-term-red/20 px-2.5 py-1 text-xs font-medium text-red-200 transition-opacity hover:opacity-90 hover:bg-term-red/30 flex items-center gap-1"
+          >
+            <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+            Hard Reset
+          </button>
           <button
             type="button"
             onClick={() => setVmOpen(true)}

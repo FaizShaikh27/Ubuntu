@@ -28,28 +28,52 @@ function TerminalWorkspace() {
             ? "Split view — both terminals share the same filesystem."
             : "Single terminal — click Split to open a second terminal side-by-side."}
         </p>
-        <button
-          type="button"
-          onClick={() => setSplit((s) => !s)}
-          className={[
-            "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all duration-200",
-            split
-              ? "border-term-red/40 bg-term-red/10 text-term-red hover:bg-term-red/20"
-              : "border-term-green/40 bg-term-green/10 text-term-green hover:bg-term-green/20",
-          ].join(" ")}
-        >
-          {split ? (
-            <>
-              <SplitIcon className="size-4 rotate-90" />
-              Unsplit
-            </>
-          ) : (
-            <>
-              <SplitIcon className="size-4" />
-              Split Terminal
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                typeof window !== "undefined" &&
+                window.confirm(
+                  "Hard Reset will stop all running processes, erase all cached memory & files, and restart the terminal. Continue?"
+                )
+              ) {
+                window.localStorage.clear();
+                window.location.reload();
+              }
+            }}
+            className="flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-500/20 transition-all duration-200"
+            title="Erase cached memory & stop stuck processes"
+          >
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+            Hard Reset
+          </button>
+          <button
+            type="button"
+            onClick={() => setSplit((s) => !s)}
+            className={[
+              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all duration-200",
+              split
+                ? "border-term-red/40 bg-term-red/10 text-term-red hover:bg-term-red/20"
+                : "border-term-green/40 bg-term-green/10 text-term-green hover:bg-term-green/20",
+            ].join(" ")}
+          >
+            {split ? (
+              <>
+                <SplitIcon className="size-4 rotate-90" />
+                Unsplit
+              </>
+            ) : (
+              <>
+                <SplitIcon className="size-4" />
+                Split Terminal
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* ── Terminal pane(s) ── */}

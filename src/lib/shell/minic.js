@@ -1030,11 +1030,10 @@ export class CInterpreter {
       case "isupper": return /[A-Z]/.test(String.fromCharCode(n0)) ? 1 : 0;
       case "islower": return /[a-z]/.test(String.fromCharCode(n0)) ? 1 : 0;
       case "isprint": return n0 >= 32 && n0 < 127 ? 1 : 0;
-      // sleep — update process state, then briefly yield
+      // sleep — update process state and wait exact duration
       case "sleep": {
-        const requestedSecs = n0;
-        // Cap at 2 seconds for classroom convenience
-        const actualMs = Math.min(requestedSecs * 1000, 2000);
+        const requestedSecs = Math.max(0, n0);
+        const actualMs = requestedSecs * 1000;
         this.processTable.markSleeping(this.pid);
         if (actualMs > 0) {
           await new Promise((r) => setTimeout(r, actualMs));
@@ -1043,8 +1042,8 @@ export class CInterpreter {
         return 0;
       }
       case "usleep": {
-        const us = n0;
-        const ms = Math.min(Math.floor(us / 1000), 2000);
+        const us = Math.max(0, n0);
+        const ms = Math.floor(us / 1000);
         this.processTable.markSleeping(this.pid);
         if (ms > 0) await new Promise((r) => setTimeout(r, ms));
         this.processTable.markRunning(this.pid);
