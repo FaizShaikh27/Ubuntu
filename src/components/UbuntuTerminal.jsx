@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { runCommandLine } from "@/src/lib/shell/interpreter.js";
 import { commands } from "@/src/lib/shell/commands.js";
 import { createSession, displayPath } from "@/src/lib/shell/session.js";
+import { NanoEditor } from "@/src/components/NanoEditor.jsx";
 
 function makeBanner(terminalId) {
   const lines = [
@@ -213,13 +214,18 @@ export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, 
     }
   };
 
-  const saveEditor = () => {
-    if (!editor) return;
-    ctx.fs.writeFile(editor.path, editor.text);
-    append({ kind: "out", text: `[ Wrote ${editor.text.split("\n").length} lines to ${editor.path} ]\n` });
+  // saveEditor is now handled inside NanoEditor; this shell callback
+  // is called by NanoEditor via onSave.
+  const handleNanoSave = useCallback((savePath, saveText) => {
+    ctx.fs.writeFile(savePath, saveText);
+    ctx.fs.persist();
+  }, [ctx]);
+
+  const handleNanoClose = useCallback((msg) => {
+    if (msg) append({ kind: "out", text: msg + "\n" });
     setEditor(null);
     requestAnimationFrame(() => inputRef.current?.focus());
-  };
+  }, [append]);
 
   const titleLabel = label
     ? `${label} — student@ubuntu: ${cwdLabel}`
@@ -307,33 +313,15 @@ export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, 
         )}
       </div>
 
-      {/* ── nano editor overlay ── */}
+      {/* ── GNU nano editor overlay ── */}
       {editor && (
-        <div className="absolute inset-0 z-50 flex flex-col bg-term-bg/95 p-4 font-mono text-term-fg backdrop-blur rounded-xl">
-          <div className="mb-2 flex items-center justify-between font-sans text-sm">
-            <span>GNU nano — {editor.path}</span>
-            <span className="text-term-dim">Ctrl+S / Save · Esc / Exit</span>
-          </div>
-          <textarea
-            autoFocus
-            value={editor.text}
-            onChange={(e) => setEditor({ ...editor, text: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveEditor(); }
-              if (e.key === "Escape") setEditor(null);
-            }}
-            className="flex-1 resize-none rounded-md border border-term-fg/20 bg-term-bg p-3 text-[14px] outline-none"
-            spellCheck={false}
-          />
-          <div className="mt-2 flex gap-2 font-sans text-sm">
-            <button type="button" onClick={saveEditor} className="rounded-md bg-orange px-3 py-1.5 text-orange-foreground">
-              Save (Ctrl+S)
-            </button>
-            <button type="button" onClick={() => setEditor(null)} className="rounded-md border border-term-fg/30 px-3 py-1.5">
-              Close
-            </button>
-          </div>
-        </div>
+        <NanoEditor
+          path={editor.path}
+          initialText={editor.text}
+          onSave={handleNanoSave}
+          onClose={() => handleNanoClose(null)}
+          onWriteMsg={(msg) => handleNanoClose(msg)}
+        />
       )}
 
       {/* ── Full Ubuntu VM overlay ── */}
