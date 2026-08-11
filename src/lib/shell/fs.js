@@ -121,6 +121,41 @@ export class VFS {
     this.persist();
   }
 
+  /**
+   * Merge a public file tree (from /api/terminal-files) into a target VFS
+   * directory WITHOUT overwriting files the user has already created or edited.
+   *
+   * @param {object} publicTree  — JSON tree from the API  { type, children }
+   * @param {string} targetPath  — absolute VFS path to merge into (e.g. "/home/student")
+   */
+  mergePublic(publicTree, targetPath = "/home/student") {
+    if (!publicTree || publicTree.type !== "dir") return;
+    this._mergeNode(publicTree, targetPath);
+    this.persist();
+  }
+
+  /** Recursive helper for mergePublic. */
+  _mergeNode(node, vfsPath) {
+    if (node.type === "dir") {
+      // Ensure the directory exists in the VFS
+      if (!this.lookup(vfsPath)) {
+        this.mkdir(vfsPath, true);
+      }
+      for (const [name, child] of Object.entries(node.children ?? {})) {
+        this._mergeNode(child, (vfsPath === "/" ? "" : vfsPath) + "/" + name);
+      }
+    } else if (node.type === "file") {
+      // Only inject if the file does NOT already exist (preserve user edits)
+      if (!this.lookup(vfsPath)) {
+        // Detect executable scripts
+        const isExec = node.content?.startsWith("#!/") || vfsPath.endsWith(".sh");
+        const mode = isExec ? 0o755 : 0o644;
+        this.writeFile(vfsPath, node.content ?? "", mode);
+      }
+    }
+  }
+
+
   normalize(path, cwd) {
     let p = path;
     if (!p.startsWith("/")) p = cwd.replace(/\/$/, "") + "/" + p;

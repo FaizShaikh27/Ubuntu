@@ -105,6 +105,26 @@ export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, 
     return () => window.removeEventListener("ubuntu-terminal-edit", onEdit);
   }, [ctx, instanceId]);
 
+  // ── Fetch and merge public files from server on first load ──────────────
+  // Only the first terminal instance triggers the fetch; both terminals share
+  // the same VFS so the files become visible in both panes automatically.
+  useEffect(() => {
+    if (instanceId !== 0) return; // only fetch once across split terminals
+    let cancelled = false;
+    fetch("/api/terminal-files")
+      .then((r) => r.ok ? r.json() : null)
+      .then((tree) => {
+        if (cancelled || !tree) return;
+        ctx.fs.mergePublic(tree, "/home/student");
+        // Trigger a re-render of the cwd label in case new files changed ls output
+        setCwdLabel(displayPath(ctx.cwd));
+      })
+      .catch(() => {
+        // Silently ignore — server may not be running or folder may not exist
+      });
+    return () => { cancelled = true; };
+  }, [ctx, instanceId, setCwdLabel]);
+
   const submit = useCallback(
     async (line) => {
       if (reading && readResolver.current) {
