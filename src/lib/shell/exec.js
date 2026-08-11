@@ -58,6 +58,8 @@ export async function runExecutable(path, io, ctx) {
         ppid: 1,
         processTable: globalProcessTable,
         execName,
+        fs:  ctx.fs,
+        cwd: ctx.cwd,
       }
     );
     try {

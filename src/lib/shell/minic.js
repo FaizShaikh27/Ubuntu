@@ -1,10 +1,12 @@
 /**
  * A compact C interpreter good enough for classroom practicals:
  * variables, arrays, pointers-lite, control flow, functions, printf/scanf,
- * string.h and math.h helpers.
+ * string.h, math.h and POSIX filesystem helpers.
  *
- * Extended with full fork()/wait()/getpid()/getppid()/sleep()/exit() simulation
- * for OS Practical 8 (fork, zombie, orphan processes).
+ * Supports OS practicals 6–8:
+ *   Practical 6 — stat(), S_ISDIR/S_ISREG, file metadata
+ *   Practical 7 — opendir(), readdir(), closedir(), struct dirent
+ *   Practical 8 — fork(), wait(), zombie/orphan process simulation
  */
 
 import { globalProcessTable } from "./process-table.js";
@@ -17,19 +19,24 @@ const isArray = (v) => typeof v === "object" && v !== null && "__array" in v;
 /* ------------------------------------------------------------------ */
 
 const HEADER_DECLS = {
-  "stdio.h":    ["printf","fprintf","scanf","fscanf","puts","putchar","getchar","gets","fgets","fflush","perror","sprintf","sscanf"],
-  "stdlib.h":   ["exit","abort","malloc","calloc","realloc","free","atoi","atof","atol","rand","srand","abs"],
-  "string.h":   ["strlen","strcpy","strncpy","strcat","strncat","strcmp","strncmp","strrev","memset","memcpy","memmove","strchr","strstr"],
+  "stdio.h":    ["printf","fprintf","scanf","fscanf","puts","putchar","getchar","gets","fgets","fflush","perror","sprintf","sscanf","fopen","fclose","fread","fwrite","feof","ferror","rewind","fseek","ftell","fgets","fputs"],
+  "stdlib.h":   ["exit","abort","malloc","calloc","realloc","free","atoi","atof","atol","rand","srand","abs","qsort","bsearch"],
+  "string.h":   ["strlen","strcpy","strncpy","strcat","strncat","strcmp","strncmp","strrev","memset","memcpy","memmove","strchr","strstr","strtok","strerror"],
   "math.h":     ["sqrt","pow","fabs","floor","ceil","round","sin","cos","tan","asin","acos","atan","atan2","log","log2","log10","exp","fmod"],
-  "unistd.h":   ["fork","getpid","getppid","sleep","usleep","pipe","close","read","write","exec","execl","execv","execvp","dup","dup2","chdir","getcwd"],
+  "unistd.h":   ["fork","getpid","getppid","sleep","usleep","pipe","close","read","write","exec","execl","execv","execvp","dup","dup2","chdir","getcwd","access","unlink","rmdir","lseek","getuid","getgid","geteuid","getegid"],
   "sys/types.h":[],
+  "sys/stat.h": ["stat","lstat","fstat","chmod","mkdir","umask","mkfifo","S_ISDIR","S_ISREG","S_ISLNK","S_ISBLK","S_ISCHR","S_ISFIFO","S_ISSOCK"],
   "sys/wait.h": ["wait","waitpid","WIFEXITED","WEXITSTATUS","WIFSIGNALED","WTERMSIG"],
+  "dirent.h":   ["opendir","readdir","closedir","rewinddir","scandir","alphasort"],
   "time.h":     ["time","clock","difftime","mktime","localtime","gmtime","strftime","ctime"],
-  "ctype.h":    ["isdigit","isalpha","isalnum","isspace","isupper","islower","toupper","tolower","isprint"],
+  "ctype.h":    ["isdigit","isalpha","isalnum","isspace","isupper","islower","toupper","tolower","isprint","ispunct"],
   "assert.h":   ["assert"],
-  "errno.h":    [],
+  "errno.h":    ["perror"],
   "fcntl.h":    ["open","creat","fcntl"],
   "signal.h":   ["signal","kill","raise"],
+  "limits.h":   [],
+  "stddef.h":   [],
+  "stdarg.h":   [],
 };
 
 /**
@@ -102,7 +109,20 @@ function unescapeChar(c) {
 /* Parser                                                             */
 /* ------------------------------------------------------------------ */
 
-const TYPES = new Set(["int", "float", "double", "char", "long", "short", "void", "unsigned", "signed", "const", "pid_t", "size_t", "ssize_t", "uint8_t", "uint16_t", "uint32_t", "int8_t", "int16_t", "int32_t"]);
+const TYPES = new Set([
+  // fundamental
+  "int","float","double","char","long","short","void","unsigned","signed",
+  // qualifiers / storage class (consumed but ignored)
+  "const","volatile","static","extern","register","auto","inline","typedef",
+  // POSIX typedef'd scalar types
+  "pid_t","size_t","ssize_t","off_t","ino_t","mode_t","nlink_t","uid_t","gid_t",
+  "dev_t","blksize_t","blkcnt_t","time_t","clock_t","socklen_t","uint8_t",
+  "uint16_t","uint32_t","int8_t","int16_t","int32_t",
+  // struct / union / enum keywords (consumed as a type token)
+  "struct","union","enum",
+  // common opaque pointer types used in practicals 6 & 7
+  "DIR","FILE","dirent","stat","timeval","timespec",
+]);
 
 class CParser {
   constructor(toks) { this.toks = toks; this.p = 0; }
@@ -303,9 +323,16 @@ class BreakErr {}
 class ContinueErr {}
 
 function toNum(v) {
-  if (v === undefined) return 0;
+  if (v === undefined || v === null) return 0;
   if (typeof v === "number") return v;
   if (typeof v === "string") return v.length ? v.charCodeAt(0) : 0;
+  if (typeof v === "object") {
+    // Struct / DIR objects expose a fake non-zero memory address so that
+    // NULL-checks like `while (entry = readdir(dir)) != NULL` work correctly.
+    if ("__addr" in v) return v.__addr;
+    // char arrays / malloc'd memory are truthy (non-null pointer)
+    if ("__array" in v) return 1;
+  }
   return 0;
 }
 
@@ -341,7 +368,6 @@ export class CInterpreter {
   constructor(io, opts = {}) {
     this.io = io;
     this.funcs = new Map();
-    this.globals = {};
     this.scopes = [];
     this.inputBuffer = [];
     this.steps = 0;
@@ -352,13 +378,57 @@ export class CInterpreter {
     this.ppid = opts.ppid ?? 1;
     this.execName = opts.execName ?? "a.out";
 
-    // Fork dual-run state:
-    //   null    → first encounter of fork(); throws ForkSignal
-    //   'child' → fork() returns 0
-    //   'parent'→ fork() returns this.forkChildPid
+    // Fork dual-run state
     this.forkMode     = opts.forkMode     ?? null;
     this.forkChildPid = opts.forkChildPid ?? 0;
-    this.forkCallCount = 0; // which fork() call we're simulating (for multi-fork programs)
+    this.forkCallCount = 0;
+
+    // VFS access (passed from exec.js for filesystem syscalls)
+    this.vfs = opts.fs  ?? null;
+    this.cwd = opts.cwd ?? "/home/student";
+
+    // File descriptor table  { fd → { type, content, pos, path } }
+    this._fdTable = new Map([
+      [0, { type: "stdin"  }],
+      [1, { type: "stdout" }],
+      [2, { type: "stderr" }],
+    ]);
+    this._nextFd = 3;
+
+    // Counter for unique fake addresses assigned to struct/DIR objects
+    this._structAddr = 100;
+
+    // Pre-defined C constants injected as globals so code using them works
+    // without explicit #define (common in simple teaching programs).
+    this.globals = {
+      NULL: 0, EOF: -1,
+      STDIN_FILENO: 0, STDOUT_FILENO: 1, STDERR_FILENO: 2,
+      EXIT_SUCCESS: 0, EXIT_FAILURE: 1,
+      RAND_MAX: 32767,
+      // fcntl.h flags
+      O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2,
+      O_CREAT: 64, O_TRUNC: 512, O_APPEND: 1024, O_EXCL: 128,
+      // lseek whence
+      SEEK_SET: 0, SEEK_CUR: 1, SEEK_END: 2,
+      // stat mode type bits
+      S_IFMT: 0o170000, S_IFSOCK: 0o140000, S_IFLNK: 0o120000,
+      S_IFREG: 0o100000, S_IFBLK: 0o060000, S_IFDIR: 0o040000,
+      S_IFCHR: 0o020000, S_IFIFO: 0o010000,
+      // common permission bits
+      S_IRWXU: 0o700, S_IRUSR: 0o400, S_IWUSR: 0o200, S_IXUSR: 0o100,
+      S_IRWXG: 0o070, S_IRGRP: 0o040, S_IWGRP: 0o020, S_IXGRP: 0o010,
+      S_IRWXO: 0o007, S_IROTH: 0o004, S_IWOTH: 0o002, S_IXOTH: 0o001,
+      // access() mode bits
+      F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1,
+      // dirent d_type
+      DT_UNKNOWN: 0, DT_FIFO: 1, DT_CHR: 2, DT_DIR: 4,
+      DT_BLK: 6, DT_REG: 8, DT_LNK: 10, DT_SOCK: 12,
+      // misc
+      PATH_MAX: 4096, NAME_MAX: 255, BUFSIZ: 8192,
+      // errno values (simplified)
+      ENOENT: 2, EACCES: 13, EEXIST: 17, ENOTDIR: 20,
+      EISDIR: 21, EINVAL: 22, ENOSPC: 28, ENAMETOOLONG: 36,
+    };
 
     // Set of function names declared by the program's headers (no warning needed)
     this.declaredFunctions = new Set();
@@ -561,7 +631,16 @@ export class CInterpreter {
       case "num": return e.v;
       case "str": return e.v;
       case "var": return this.getVar(e.name);
-      case "field": return 0; // struct fields not fully supported
+      case "field": {
+        // Resolve struct/DIR objects by reading their JS properties directly.
+        // This makes `entry->d_name`, `st.st_size`, `dir->pos` all work.
+        const base = await this.eval(e.base);
+        if (base !== null && typeof base === "object" && !("__array" in base)) {
+          const val = base[e.field];
+          if (val !== undefined) return val;
+        }
+        return 0;
+      }
       case "index": { const base = await this.eval(e.base); const idx = toNum(await this.eval(e.index)); if (isArray(base)) return base.__array[idx] ?? 0; if (typeof base === "string") return base.charCodeAt(idx) || 0; return 0; }
       case "cond": return toNum(await this.eval(e.c)) ? this.eval(e.a) : this.eval(e.b);
       case "un": {
@@ -611,6 +690,230 @@ export class CInterpreter {
     // User-defined functions take priority
     const user = this.funcs.get(name);
     if (user) { const args = []; for (const a of argExprs) args.push(await this.eval(a)); return this.callFunction(user, args); }
+
+    // ----------------------------------------------------------------
+    // Filesystem syscalls — Practicals 6 & 7
+    // ----------------------------------------------------------------
+
+    if (name === "opendir") {
+      const pathStr = toStr(await this.eval(argExprs[0]));
+      if (!this.vfs) return 0;
+      const absPath = this.vfs.normalize(pathStr, this.cwd);
+      const node = this.vfs.lookup(absPath);
+      if (!node || node.type !== "dir") { this.io.err(`opendir: ${pathStr}: No such file or directory\n`); return 0; }
+      // Include . and .. plus sorted children
+      const entries = [".", "..", ...this.vfs.list(absPath)];
+      const addr = ++this._structAddr;
+      return { __dir: true, __addr: addr, _vfsPath: absPath, _entries: entries, _pos: 0 };
+    }
+
+    if (name === "readdir") {
+      const dir = await this.eval(argExprs[0]);
+      if (!dir || typeof dir !== "object" || !dir.__dir) return 0; // NULL
+      if (dir._pos >= dir._entries.length) return 0; // end of directory
+      const entryName = dir._entries[dir._pos++];
+      const entryPath = (dir._vfsPath === "/" ? "" : dir._vfsPath) + "/" + entryName;
+      const node = this.vfs?.lookup(this.vfs.normalize(entryPath, "/")) ?? null;
+      const isDir = node?.type === "dir";
+      // Fake inode: hash of the path (deterministic, always > 0)
+      const ino = Math.abs(entryPath.split("").reduce((h, c) => Math.imul(31, h) + c.charCodeAt(0) | 0, 1));
+      const addr = ++this._structAddr;
+      return {
+        __struct: "dirent", __addr: addr,
+        d_ino: ino || 1,
+        d_name: entryName,
+        d_type: isDir ? 4 : 8, // DT_DIR=4, DT_REG=8
+        d_reclen: 0, d_off: dir._pos,
+      };
+    }
+
+    if (name === "closedir" || name === "rewinddir") {
+      const dir = await this.eval(argExprs[0]);
+      if (name === "rewinddir" && dir && typeof dir === "object") dir._pos = 0;
+      return 0;
+    }
+
+    // stat / lstat — fill a struct stat via pointer
+    if (name === "stat" || name === "lstat") {
+      const pathStr = toStr(await this.eval(argExprs[0]));
+      const bufExpr = argExprs[1];
+      if (!this.vfs) return -1;
+      const absPath = this.vfs.normalize(pathStr, this.cwd);
+      const node = this.vfs.lookup(absPath);
+      if (!node) { this.io.err(`${name}: cannot stat '${pathStr}': No such file or directory\n`); return -1; }
+      const isDir = node.type === "dir";
+      const content = isDir ? "" : (node.content ?? "");
+      const ino = Math.abs(absPath.split("").reduce((h, c) => Math.imul(31, h) + c.charCodeAt(0) | 0, 1)) || 1;
+      const modeBase = node.mode ?? (isDir ? 0o755 : 0o644);
+      const modeTypeBit = isDir ? 0o040000 : 0o100000;
+      const st = {
+        __struct: "stat", __addr: ++this._structAddr,
+        st_dev: 1, st_ino: ino,
+        st_mode: modeTypeBit | modeBase,
+        st_nlink: isDir ? 2 : 1,
+        st_uid: 1000, st_gid: 1000,
+        st_rdev: 0,
+        st_size: content.length,
+        st_blksize: 4096,
+        st_blocks: Math.ceil(content.length / 512),
+        st_atime: Math.floor((node.mtime ?? Date.now()) / 1000),
+        st_mtime: Math.floor((node.mtime ?? Date.now()) / 1000),
+        st_ctime: Math.floor((node.mtime ?? Date.now()) / 1000),
+      };
+      // Assign to the pointer arg (e.g. &st or buf)
+      const dest = bufExpr?.k === "un" && bufExpr.op === "&" ? bufExpr.e : bufExpr;
+      if (dest) await this.assignTo(dest, st);
+      return 0;
+    }
+
+    // fstat — stat by file descriptor
+    if (name === "fstat") {
+      const fd = toNum(await this.eval(argExprs[0]));
+      const bufExpr = argExprs[1];
+      const entry = this._fdTable.get(fd);
+      if (!entry || !entry.path || !this.vfs) return -1;
+      // Re-use stat logic
+      return this.callByName("stat", [{ k: "str", v: entry.path }, bufExpr]);
+    }
+
+    // open() — return a file descriptor
+    if (name === "open" || name === "creat") {
+      const pathStr = toStr(await this.eval(argExprs[0]));
+      const flags   = toNum(await this.eval(argExprs[1] ?? { k: "num", v: 0 }));
+      if (!this.vfs) return -1;
+      const absPath = this.vfs.normalize(pathStr, this.cwd);
+      const O_WRONLY = 1, O_RDWR = 2, O_CREAT = 64, O_TRUNC = 512, O_APPEND = 1024;
+      const forWrite = (flags & (O_WRONLY | O_RDWR)) !== 0 || name === "creat";
+      const doCreate = (flags & O_CREAT) !== 0 || name === "creat";
+      let node = this.vfs.lookup(absPath);
+      if (!node) {
+        if (!doCreate) { this.io.err(`open: ${pathStr}: No such file or directory\n`); return -1; }
+        this.vfs.writeFile(absPath, "", 0o644);
+        node = this.vfs.lookup(absPath);
+      }
+      if (node?.type === "dir") { this.io.err(`open: ${pathStr}: Is a directory\n`); return -1; }
+      const content = node?.content ?? "";
+      const fd = this._nextFd++;
+      this._fdTable.set(fd, {
+        type: "file",
+        path: absPath,
+        content: (flags & O_TRUNC) ? "" : content,
+        pos: (flags & O_APPEND) ? content.length : 0,
+        writable: forWrite,
+      });
+      return fd;
+    }
+
+    // read() — read bytes from fd into buffer
+    if (name === "read") {
+      const fd    = toNum(await this.eval(argExprs[0]));
+      const bufExpr = argExprs[1];
+      const count = toNum(await this.eval(argExprs[2] ?? { k: "num", v: 0 }));
+      if (fd === 0) {
+        // stdin
+        const line = (await this.io.readLine()) ?? "";
+        const chunk = line.slice(0, count);
+        const dest = bufExpr?.k === "un" && bufExpr.op === "&" ? bufExpr.e : bufExpr;
+        if (dest) await this.assignTo(dest, fromString(chunk));
+        return chunk.length;
+      }
+      const entry = this._fdTable.get(fd);
+      if (!entry) return -1;
+      const chunk = entry.content.slice(entry.pos, entry.pos + count);
+      entry.pos += chunk.length;
+      const dest = bufExpr?.k === "un" && bufExpr.op === "&" ? bufExpr.e : bufExpr;
+      if (dest) await this.assignTo(dest, fromString(chunk));
+      return chunk.length;
+    }
+
+    // write() — write bytes from buffer to fd
+    if (name === "write") {
+      const fd    = toNum(await this.eval(argExprs[0]));
+      const buf   = await this.eval(argExprs[1]);
+      const count = toNum(await this.eval(argExprs[2] ?? { k: "num", v: 0 }));
+      const text  = toStr(buf).slice(0, count);
+      if (fd === 1) { this.io.out(text); return text.length; }
+      if (fd === 2) { this.io.err(text); return text.length; }
+      const entry = this._fdTable.get(fd);
+      if (!entry || !entry.writable) return -1;
+      const before = entry.content.slice(0, entry.pos);
+      const after  = entry.content.slice(entry.pos + text.length);
+      entry.content = before + text + after;
+      entry.pos += text.length;
+      // Persist to VFS
+      if (entry.path && this.vfs) this.vfs.writeFile(entry.path, entry.content);
+      return text.length;
+    }
+
+    // close() — already handled in unistd.h section for fork; also handle fd close
+    if (name === "close" && argExprs.length >= 1) {
+      const fd = toNum(await this.eval(argExprs[0]));
+      if (fd >= 3) { this._fdTable.delete(fd); }
+      return 0;
+    }
+
+    // lseek()
+    if (name === "lseek") {
+      const fd     = toNum(await this.eval(argExprs[0]));
+      const offset = toNum(await this.eval(argExprs[1] ?? { k: "num", v: 0 }));
+      const whence = toNum(await this.eval(argExprs[2] ?? { k: "num", v: 0 }));
+      const entry  = this._fdTable.get(fd);
+      if (!entry) return -1;
+      const len = entry.content?.length ?? 0;
+      if (whence === 0 /* SEEK_SET */) entry.pos = offset;
+      else if (whence === 1 /* SEEK_CUR */) entry.pos = entry.pos + offset;
+      else if (whence === 2 /* SEEK_END */) entry.pos = len + offset;
+      entry.pos = Math.max(0, Math.min(entry.pos, len));
+      return entry.pos;
+    }
+
+    // access(path, mode) — always succeeds for existing files
+    if (name === "access") {
+      const pathStr = toStr(await this.eval(argExprs[0]));
+      if (!this.vfs) return -1;
+      const absPath = this.vfs.normalize(pathStr, this.cwd);
+      return this.vfs.lookup(absPath) ? 0 : -1;
+    }
+
+    // chmod(path, mode)
+    if (name === "chmod") {
+      const pathStr = toStr(await this.eval(argExprs[0]));
+      const mode    = toNum(await this.eval(argExprs[1] ?? { k: "num", v: 0 }));
+      if (!this.vfs) return -1;
+      const absPath = this.vfs.normalize(pathStr, this.cwd);
+      const err = this.vfs.chmod(absPath, mode);
+      return err ? -1 : 0;
+    }
+
+    // getcwd(buf, size)
+    if (name === "getcwd") {
+      const bufExpr = argExprs[0];
+      const dest = bufExpr?.k === "un" && bufExpr.op === "&" ? bufExpr.e : bufExpr;
+      if (dest) await this.assignTo(dest, fromString(this.cwd));
+      return dest ? 1 : 0; // return non-null (truthy)
+    }
+
+    // chdir(path)
+    if (name === "chdir") {
+      const pathStr = toStr(await this.eval(argExprs[0]));
+      if (!this.vfs) return -1;
+      const absPath = this.vfs.normalize(pathStr, this.cwd);
+      if (this.vfs.isDir(absPath)) { this.cwd = absPath; return 0; }
+      return -1;
+    }
+
+    // S_IS* — POSIX mode-type test macros (used as function calls in our interpreter)
+    if (name === "S_ISDIR" || name === "S_ISREG" || name === "S_ISLNK" ||
+        name === "S_ISBLK" || name === "S_ISCHR" || name === "S_ISFIFO" || name === "S_ISSOCK") {
+      const mode = toNum(await this.eval(argExprs[0]));
+      const typeMap = { S_ISDIR:0o040000, S_ISREG:0o100000, S_ISLNK:0o120000,
+                        S_ISBLK:0o060000, S_ISCHR:0o020000, S_ISFIFO:0o010000, S_ISSOCK:0o140000 };
+      return (mode & 0o170000) === typeMap[name] ? 1 : 0;
+    }
+
+    // getuid / getgid
+    if (name === "getuid" || name === "geteuid") return 1000;
+    if (name === "getgid" || name === "getegid") return 1000;
 
     // ----------------------------------------------------------------
     // Process simulation syscalls (Practical 8)
