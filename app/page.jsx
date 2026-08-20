@@ -123,7 +123,7 @@ function TerminalWorkspace() {
             body: "fork(), zombie & orphan processes, ps -el | grep Z — OS Practical 8 fully supported.",
           },
         ].map((card) => (
-          <article key={card.title} className="rounded-lg border border-border bg-card p-4">
+          <article key={card.title} className="rounded-lg border border-border bg-card p-3">
             <h2 className="text-sm font-semibold text-card-foreground">{card.title}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{card.body}</p>
           </article>
@@ -155,13 +155,13 @@ function SplitIcon({ className = "" }) {
 
 export default function Home() {
   return (
-    <main className="h-screen bg-background px-4 py-4 sm:py-8 font-sans overflow-hidden flex flex-col">
+    <main className="h-screen bg-background px-4 py-2 sm:py-4 font-sans overflow-hidden flex flex-col">
       <div className="mx-auto max-w-7xl flex-1 flex flex-col min-h-0 w-full">
-        <header className="mb-4 sm:mb-6 shrink-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+        <header className="mb-2 sm:mb-3 shrink-0">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
             Ubuntu Terminal for students
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground leading-tight">
             A GNOME Terminal replica that really runs your practicals: bash scripting, coreutils, file
             permissions, <code className="font-mono">gcc</code>, and OS process simulation (fork, zombie,
             orphan). Files you create stay cached in this browser.
@@ -170,7 +170,7 @@ export default function Home() {
 
         <TerminalWorkspace />
 
-        <p className="mt-4 sm:mt-6 text-xs text-muted-foreground shrink-0 hidden sm:block">
+        <p className="mt-2 sm:mt-3 text-[11px] text-muted-foreground shrink-0 hidden sm:block">
           Need <code className="font-mono">apt</code>, <code className="font-mono">python3</code> or the real
           compiler toolchain? Run <code className="font-mono">ubuntu-vm</code>.
         </p>
