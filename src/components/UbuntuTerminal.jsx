@@ -284,7 +284,7 @@ export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, 
     : `student@ubuntu: ${cwdLabel}`;
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-xl border border-black/40 shadow-2xl h-full">
+    <div className="relative flex flex-col overflow-hidden rounded-xl border border-black/40 shadow-2xl h-full">
       {/* ── Title bar ── */}
       <div className="flex items-center justify-between bg-titlebar px-3 py-2 font-sans text-sm text-titlebar-foreground flex-shrink-0">
         <div className="flex items-center gap-2">
