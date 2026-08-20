@@ -20,9 +20,9 @@ function TerminalWorkspace() {
   const sharedFs = useMemo(() => new VFS(), []);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 flex-1 min-h-0">
       {/* ── Toolbar ── */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between shrink-0">
         <p className="text-sm text-muted-foreground">
           {split
             ? "Split view — both terminals share the same filesystem."
@@ -79,13 +79,12 @@ function TerminalWorkspace() {
       {/* ── Terminal pane(s) ── */}
       <div
         className={[
-          "grid gap-3",
+          "grid gap-3 flex-1 min-h-0",
           split ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1",
         ].join(" ")}
-        style={split ? { minHeight: "70vh" } : {}}
       >
         {/* Terminal 1 — always visible */}
-        <div className={split ? "relative min-h-[420px]" : ""} style={split ? { height: "70vh" } : {}}>
+        <div className="relative min-h-0 h-full w-full">
           <UbuntuTerminal
             sharedFs={sharedFs}
             label={split ? "Terminal 1" : null}
@@ -96,7 +95,7 @@ function TerminalWorkspace() {
 
         {/* Terminal 2 — only in split mode */}
         {split && (
-          <div className="relative min-h-[420px]" style={{ height: "70vh" }}>
+          <div className="relative min-h-0 h-full w-full">
             <UbuntuTerminal
               sharedFs={sharedFs}
               label="Terminal 2"
@@ -109,7 +108,7 @@ function TerminalWorkspace() {
       </div>
 
       {/* ── Feature cards ── */}
-      <section className="mt-2 grid gap-4 sm:grid-cols-3">
+      <section className="mt-2 grid gap-4 sm:grid-cols-3 hidden sm:grid shrink-0">
         {[
           {
             title: "Shell scripting",
@@ -156,9 +155,9 @@ function SplitIcon({ className = "" }) {
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-background px-4 py-8 font-sans">
-      <div className="mx-auto max-w-7xl">
-        <header className="mb-6">
+    <main className="h-screen bg-background px-4 py-4 sm:py-8 font-sans overflow-hidden flex flex-col">
+      <div className="mx-auto max-w-7xl flex-1 flex flex-col min-h-0 w-full">
+        <header className="mb-4 sm:mb-6 shrink-0">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
             Ubuntu Terminal for students
           </h1>
@@ -171,7 +170,7 @@ export default function Home() {
 
         <TerminalWorkspace />
 
-        <p className="mt-6 text-xs text-muted-foreground">
+        <p className="mt-4 sm:mt-6 text-xs text-muted-foreground shrink-0 hidden sm:block">
           Need <code className="font-mono">apt</code>, <code className="font-mono">python3</code> or the real
           compiler toolchain? Run <code className="font-mono">ubuntu-vm</code>.
         </p>
