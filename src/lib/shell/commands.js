@@ -75,7 +75,7 @@ export const commands = {
       const node = ctx.fs.lookup(path);
       if (!node) { io.err(`ls: cannot access '${target}': No such file or directory\n`); status = 2; continue; }
       const entries = [];
-      if (node.type === "file") entries.push({ name: target, node });
+      if (node.type === "file" || node.type === "fifo") entries.push({ name: target, node });
       else {
         for (const name of ctx.fs.list(path)) {
           if (!flags.has("a") && name.startsWith(".")) continue;
@@ -86,7 +86,7 @@ export const commands = {
       const header = targets.length > 1 ? `${target}:\n` : "";
       if (flags.has("l")) {
         const body = entries.map((e) => {
-          const size = e.node.type === "file" ? e.node.content.length : 4096;
+          const size = e.node.type === "file" ? e.node.content.length : 0;
           return `${modeString(e.node)} 1 student student ${String(size).padStart(6)} ${shortDate(e.node.mtime)} ${e.name}`;
         }).join("\n");
         chunks.push(header + (entries.length ? `total ${entries.length}\n${body}\n` : ""));
@@ -119,6 +119,16 @@ export const commands = {
     if (!rest.length) { io.err("mkdir: missing operand\n"); return 1; }
     let status = 0;
     for (const t of rest) { const err = ctx.fs.mkdir(abs(ctx, t), flags.has("p")); if (err) { io.err(`mkdir: ${err}\n`); status = 1; } }
+    return status;
+  },
+  mkfifo: (io, ctx) => {
+    const targets = io.args.slice(1).filter((a) => !a.startsWith("-"));
+    if (!targets.length) { io.err("mkfifo: missing operand\n"); return 1; }
+    let status = 0;
+    for (const t of targets) {
+      const err = ctx.fs.mkfifo(abs(ctx, t));
+      if (err) { io.err(`mkfifo: ${err}\n`); status = 1; }
+    }
     return status;
   },
   rmdir: (io, ctx) => {
@@ -368,6 +378,7 @@ export const commands = {
       if (namePattern && !matchGlob(namePattern, name)) continue;
       if (typeFilter === "f" && !ctx.fs.isFile(path)) continue;
       if (typeFilter === "d" && !ctx.fs.isDir(path)) continue;
+      if (typeFilter === "p" && ctx.fs.lookup(path)?.type !== "fifo") continue;
       const rel = start === "." ? "." + path.slice(ctx.cwd === "/" ? 0 : ctx.cwd.length) : path;
       io.out((rel === "." ? "." : rel) + "\n");
     }
@@ -401,8 +412,11 @@ export const commands = {
     for (const f of io.args.slice(1)) {
       const path = abs(ctx, f); const node = ctx.fs.lookup(path);
       if (!node) { io.err(`stat: cannot statx '${f}': No such file or directory\n`); return 1; }
-      const size = node.type === "file" ? node.content.length : 4096;
-      io.out(`  File: ${f}\n  Size: ${size}\t\tBlocks: 8\t IO Block: 4096   ${node.type === "dir" ? "directory" : "regular file"}\nAccess: (${(node.mode & 0o777).toString(8).padStart(4, "0")}/${modeString(node)})  Uid: ( 1000/student)   Gid: ( 1000/student)\nModify: ${new Date(node.mtime).toISOString()}\n`);
+      const isFifo = node.type === "fifo";
+      const isDir  = node.type === "dir";
+      const size = isDir ? 4096 : isFifo ? 0 : node.content.length;
+      const typeLabel = isDir ? "directory" : isFifo ? "fifo" : "regular file";
+      io.out(`  File: ${f}\n  Size: ${size}\t\tBlocks: 8\t IO Block: 4096   ${typeLabel}\nAccess: (${(node.mode & 0o777).toString(8).padStart(4, "0")}/${modeString(node)})  Uid: ( 1000/student)   Gid: ( 1000/student)\nModify: ${new Date(node.mtime).toISOString()}\n`);
     }
     return 0;
   },
@@ -410,8 +424,9 @@ export const commands = {
     for (const f of io.args.slice(1)) {
       const node = ctx.fs.lookup(abs(ctx, f));
       if (!node) { io.out(`${f}: cannot open (No such file or directory)\n`); continue; }
-      if (node.type === "dir") io.out(`${f}: directory\n`);
-      else if (node.content.startsWith("\u007fELF")) io.out(`${f}: ELF 64-bit LSB pie executable, x86-64, dynamically linked\n`);
+      if (node.type === "dir")  { io.out(`${f}: directory\n`); continue; }
+      if (node.type === "fifo") { io.out(`${f}: fifo (named pipe)\n`); continue; }
+      if (node.content.startsWith("\u007fELF")) io.out(`${f}: ELF 64-bit LSB pie executable, x86-64, dynamically linked\n`);
       else if (node.content.startsWith("#!")) io.out(`${f}: Bourne-Again shell script, ASCII text executable\n`);
       else io.out(`${f}: ASCII text\n`);
     }

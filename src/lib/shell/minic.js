@@ -398,6 +398,9 @@ export class CInterpreter {
     // Counter for unique fake addresses assigned to struct/DIR objects
     this._structAddr = 100;
 
+    // Last errno set by a syscall (used by perror())
+    this._lastErrno = 0;
+
     // Pre-defined C constants injected as globals so code using them works
     // without explicit #define (common in simple teaching programs).
     this.globals = {
@@ -741,11 +744,13 @@ export class CInterpreter {
       const absPath = this.vfs.normalize(pathStr, this.cwd);
       const node = this.vfs.lookup(absPath);
       if (!node) { this.io.err(`${name}: cannot stat '${pathStr}': No such file or directory\n`); return -1; }
-      const isDir = node.type === "dir";
-      const content = isDir ? "" : (node.content ?? "");
+      const isDir  = node.type === "dir";
+      const isFifo = node.type === "fifo";
+      const content = isDir || isFifo ? "" : (node.content ?? "");
       const ino = Math.abs(absPath.split("").reduce((h, c) => Math.imul(31, h) + c.charCodeAt(0) | 0, 1)) || 1;
       const modeBase = node.mode ?? (isDir ? 0o755 : 0o644);
-      const modeTypeBit = isDir ? 0o040000 : 0o100000;
+      // Type bits: dir=040000, fifo=010000, regular=100000
+      const modeTypeBit = isDir ? 0o040000 : isFifo ? 0o010000 : 0o100000;
       const st = {
         __struct: "stat", __addr: ++this._structAddr,
         st_dev: 1, st_ino: ino,
@@ -790,6 +795,21 @@ export class CInterpreter {
         if (!doCreate) { this.io.err(`open: ${pathStr}: No such file or directory\n`); return -1; }
         this.vfs.writeFile(absPath, "", 0o644);
         node = this.vfs.lookup(absPath);
+      }
+      // Handle FIFO (named pipe) — connect fd to the FIFO's shared buffer
+      if (node?.type === "fifo") {
+        const fd = this._nextFd++;
+        this._fdTable.set(fd, {
+          type: "fifo",
+          path: absPath,
+          // For reading: we'll read from the FIFO buffer at close/read time.
+          // For writing: data accumulates in 'content' then is flushed to the FIFO buffer on close.
+          content: forWrite ? "" : (node.buffer ?? ""),
+          pos: 0,
+          writable: forWrite,
+          fifoNode: node,
+        });
+        return fd;
       }
       if (node?.type === "dir") { this.io.err(`open: ${pathStr}: Is a directory\n`); return -1; }
       const content = node?.content ?? "";
@@ -848,7 +868,16 @@ export class CInterpreter {
     // close() — already handled in unistd.h section for fork; also handle fd close
     if (name === "close" && argExprs.length >= 1) {
       const fd = toNum(await this.eval(argExprs[0]));
-      if (fd >= 3) { this._fdTable.delete(fd); }
+      if (fd >= 3) {
+        const entry = this._fdTable.get(fd);
+        // If this is a writable FIFO fd, flush the accumulated content to the FIFO buffer
+        if (entry?.type === "fifo" && entry.writable && entry.fifoNode) {
+          entry.fifoNode.buffer = entry.content;
+          entry.fifoNode.mtime = Date.now();
+          if (this.vfs) this.vfs.persist();
+        }
+        this._fdTable.delete(fd);
+      }
       return 0;
     }
 
@@ -954,7 +983,17 @@ export class CInterpreter {
 
     if (name === "perror") {
       const msg = toStr(await this.eval(argExprs[0]));
-      this.io.err(`${msg}: Success\n`);
+      this.io.err(`${msg}: ${this._lastErrno ? "No such file or directory" : "Success"}\n`);
+      return 0;
+    }
+
+    // mkfifo(path, mode)
+    if (name === "mkfifo") {
+      const pathStr = toStr(await this.eval(argExprs[0]));
+      if (!this.vfs) return -1;
+      const absPath = this.vfs.normalize(pathStr, this.cwd);
+      const err = this.vfs.mkfifo(absPath);
+      if (err) { this._lastErrno = 17; /* EEXIST */ this.io.err(`mkfifo: ${pathStr}: File exists\n`); return -1; }
       return 0;
     }
 

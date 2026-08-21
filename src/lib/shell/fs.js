@@ -12,6 +12,11 @@ export function file(content = "", mode = 0o644) {
   return { type: "file", content, mode, mtime: Date.now() };
 }
 
+export function fifo(mode = 0o644) {
+  // FIFOs use a 'buffer' to hold pending data between writer and reader.
+  return { type: "fifo", buffer: "", mode, mtime: Date.now() };
+}
+
 function defaultRoot() {
   return dir({
     bin: dir(),
@@ -204,7 +209,10 @@ export class VFS {
 
   readFile(abs) {
     const node = this.lookup(abs);
-    return node && node.type === "file" ? node.content : null;
+    if (!node) return null;
+    if (node.type === "file") return node.content;
+    if (node.type === "fifo") return node.buffer; // read pending FIFO data
+    return null;
   }
 
   writeFile(abs, content, mode) {
@@ -261,10 +269,19 @@ export class VFS {
     return null;
   }
 
+  mkfifo(abs) {
+    if (this.lookup(abs)) return `cannot create fifo '${abs}': File exists`;
+    const { parent, name } = this.parentOf(abs);
+    if (!parent) return `cannot create fifo '${abs}': No such file or directory`;
+    parent.children[name] = fifo();
+    this.persist();
+    return null;
+  }
+
   list(abs) {
     const node = this.lookup(abs);
     if (!node) return [];
-    if (node.type === "file") return [abs.split("/").pop() ?? abs];
+    if (node.type === "file" || node.type === "fifo") return [abs.split("/").pop() ?? abs];
     return Object.keys(node.children).sort((a, b) => a.localeCompare(b));
   }
 
@@ -311,8 +328,9 @@ export function modeString(node) {
   const perms = node.mode & 0o777;
   const rwx = (bits) =>
     (bits & 4 ? "r" : "-") + (bits & 2 ? "w" : "-") + (bits & 1 ? "x" : "-");
+  const typeChar = node.type === "dir" ? "d" : node.type === "fifo" ? "p" : "-";
   return (
-    (node.type === "dir" ? "d" : "-") +
+    typeChar +
     rwx((perms >> 6) & 7) +
     rwx((perms >> 3) & 7) +
     rwx(perms & 7)
