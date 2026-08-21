@@ -123,7 +123,10 @@ export class VFS {
 
   /**
    * Merge a public file tree (from /api/terminal-files) into a target VFS
-   * directory WITHOUT overwriting files the user has already created or edited.
+   * directory. Public (teacher-provided) files are ALWAYS written so that
+   * restoring a file to public/terminal-files/ is immediately reflected in
+   * every user's terminal. Directories and user-created files outside the
+   * public tree are left untouched.
    *
    * @param {object} publicTree  — JSON tree from the API  { type, children }
    * @param {string} targetPath  — absolute VFS path to merge into (e.g. "/home/student")
@@ -145,13 +148,11 @@ export class VFS {
         this._mergeNode(child, (vfsPath === "/" ? "" : vfsPath) + "/" + name);
       }
     } else if (node.type === "file") {
-      // Only inject if the file does NOT already exist (preserve user edits)
-      if (!this.lookup(vfsPath)) {
-        // Detect executable scripts
-        const isExec = node.content?.startsWith("#!/") || vfsPath.endsWith(".sh");
-        const mode = isExec ? 0o755 : 0o644;
-        this.writeFile(vfsPath, node.content ?? "", mode);
-      }
+      // Always write public files so restored/updated files are visible immediately.
+      // This ensures teacher-provided files are always in sync with the server.
+      const isExec = node.content?.startsWith("#!/") || vfsPath.endsWith(".sh");
+      const mode = isExec ? 0o755 : 0o644;
+      this.writeFile(vfsPath, node.content ?? "", mode);
     }
   }
 
