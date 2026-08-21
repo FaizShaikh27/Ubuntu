@@ -56,6 +56,32 @@ function extractDeclaredFunctions(source) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Preprocessor  (#define macro expansion)                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Minimal C preprocessor: expands object-like #define macros.
+ * Only handles simple `#define NAME value` forms (no function-like macros).
+ * All other # lines are left for the lexer to discard.
+ */
+function preprocess(source) {
+  const defines = new Map();
+
+  // Pass 1 – collect #define directives and erase them
+  const withoutDefines = source.replace(/^[ \t]*#[ \t]*define[ \t]+(\w+)[ \t]+(.+?)[ \t]*$/gm,
+    (_, name, value) => { defines.set(name, value.trim()); return ''; });
+
+  if (defines.size === 0) return source; // nothing to expand
+
+  // Pass 2 – substitute each macro name as a whole word
+  let result = withoutDefines;
+  for (const [name, value] of defines) {
+    result = result.replace(new RegExp(`\\b${name}\\b`, 'g'), value);
+  }
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
 /* Lexer                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -438,8 +464,11 @@ export class CInterpreter {
   }
 
   load(source) {
+    // extractDeclaredFunctions needs the original source so #include lines are visible
     this.declaredFunctions = extractDeclaredFunctions(source);
-    const parser = new CParser(lex(source));
+    // preprocess expands #define macros before the lexer/parser sees the code
+    const preprocessed = preprocess(source);
+    const parser = new CParser(lex(preprocessed));
     for (const f of parser.parseProgram()) this.funcs.set(f.name, f);
   }
 
@@ -860,8 +889,9 @@ export class CInterpreter {
       const after  = entry.content.slice(entry.pos + text.length);
       entry.content = before + text + after;
       entry.pos += text.length;
-      // Persist to VFS
-      if (entry.path && this.vfs) this.vfs.writeFile(entry.path, entry.content);
+      // Persist to VFS (skip FIFOs — their buffer is flushed on close() instead;
+      // calling writeFile on a FIFO path would replace the FIFO node with a regular file)
+      if (entry.path && this.vfs && entry.type !== "fifo") this.vfs.writeFile(entry.path, entry.content);
       return text.length;
     }
 
@@ -1157,13 +1187,14 @@ export function formatC(fmt, args) {
 
 /** Very light syntax check, mimicking common gcc diagnostics. */
 export function checkC(source, filename) {
+  const preprocessed = preprocess(source);
   const errors = [];
-  const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+  const stripped = preprocessed.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
   const opens = (stripped.match(/\{/g) ?? []).length;
   const closes = (stripped.match(/\}/g) ?? []).length;
   if (opens !== closes) errors.push(`${filename}: error: expected declaration or statement at end of input`);
   if (!/\bmain\s*\(/.test(stripped)) errors.push("/usr/bin/ld: /usr/lib/x86_64-linux-gnu/Scrt1.o: undefined reference to `main'");
-  try { new CParser(lex(source)).parseProgram(); }
+  try { new CParser(lex(preprocessed)).parseProgram(); }
   catch (err) { errors.push(`${filename}: error: ${err.message}`); }
   return errors;
 }
