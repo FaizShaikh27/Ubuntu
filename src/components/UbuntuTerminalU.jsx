@@ -337,7 +337,8 @@ export function UbuntuTerminalU({ sharedFs = null, label = null, instanceId = 0,
                 </>
               );
             })()}
-            <textarea
+            <input
+              type="text"
               ref={inputRef}
               value={input}
               autoFocus={instanceId === 0}
@@ -355,6 +356,7 @@ export function UbuntuTerminalU({ sharedFs = null, label = null, instanceId = 0,
               onFocus={updateCursorPos}
               onKeyDown={onKeyDown}
               className="term-textarea"
+              inputMode="text"
               aria-label={`Terminal ${instanceId + 1} input`}
             />
           </div>
