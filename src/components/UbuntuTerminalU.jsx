@@ -117,14 +117,17 @@ export function UbuntuTerminalU({ sharedFs = null, label = null, instanceId = 0,
 
   const submit = useCallback(
     async (line) => {
-      if (reading && readResolver.current) {
+      // The resolver is the source of truth for interactive stdin. React state
+      // can lag behind when a script immediately starts its next `read`, which
+      // previously caused that input to be executed as a shell command instead.
+      const pendingRead = readResolver.current;
+      if (pendingRead) {
         append({ kind: "out", text: line + "\n" });
-        const resolve = readResolver.current;
         readResolver.current = null;
         setReading(false);
         setInput("");
         setCursorPos(0);
-        resolve(line);
+        pendingRead(line);
         return;
       }
       const path = displayPath(ctx.cwd);
@@ -144,7 +147,7 @@ export function UbuntuTerminalU({ sharedFs = null, label = null, instanceId = 0,
       setBusy(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     },
-    [append, ctx, reading, setCwdLabel],
+    [append, ctx, setCwdLabel],
   );
 
   const complete = useCallback(() => {
