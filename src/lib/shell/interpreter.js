@@ -210,7 +210,7 @@ class Parser {
     }
     if (t.value === "((") {
       this.pos++;
-      const expr = this.collectUntil("))");
+      const expr = this.collectUntil("))", "");
       return { kind: "arith", expr };
     }
     if (t.value === "function") {
@@ -258,14 +258,14 @@ class Parser {
     while (this.peek()?.type === "nl") this.pos++;
   }
 
-  collectUntil(stop) {
+  collectUntil(stop, separator = " ") {
     const parts = [];
     while (this.peek() && this.peek().value !== stop) {
       parts.push(this.peek().value);
       this.pos++;
     }
     this.expect(stop);
-    return parts.join(" ");
+    return parts.join(separator);
   }
 
   parseIf() {
@@ -297,7 +297,9 @@ class Parser {
     this.expect("for");
     if (this.at("((")) {
       this.pos++;
-      const inner = this.collectUntil("))");
+      // Rejoin without spaces so shell redirection tokens such as `<` and `>`
+      // remain arithmetic comparison operators (`<=`, `>=`) in C-style loops.
+      const inner = this.collectUntil("))", "");
       const [init = "", cond = "", step = ""] = inner.split(";").map((s) => s.trim());
       this.skipNl();
       this.eat(";");
@@ -516,6 +518,12 @@ export async function expandWord(raw, ctx) {
           const n = raw[i + 1] ?? "";
           result += '"$`\\'.includes(n) ? n : "\\" + n;
           i += 2;
+          continue;
+        }
+        if (raw[i] === "$" && raw[i + 1] === "(" && raw[i + 2] === "(") {
+          const { body, next } = readParens(raw, i + 1);
+          result += String(evalArith(body.replace(/^\(|\)$/g, ""), ctx));
+          i = next;
           continue;
         }
         if (raw[i] === "$" && raw[i + 1] === "(") {
