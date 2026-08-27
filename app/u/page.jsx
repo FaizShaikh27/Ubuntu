@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { UbuntuTerminalU } from "@/src/components/UbuntuTerminalU";
 import { VFS } from "@/src/lib/shell/fs.js";
+import { useMidnightHardReset } from "@/src/hooks/use-midnight-hard-reset.js";
 
 import "./u.css";
 
@@ -20,6 +21,7 @@ function TerminalWorkspace() {
   // Create one shared VFS instance at the workspace level.
   // useMemo with [] ensures it is only created once.
   const sharedFs = useMemo(() => new VFS(), []);
+  useMidnightHardReset(sharedFs);
 
   return (
     <div className="workspace-wrapper">

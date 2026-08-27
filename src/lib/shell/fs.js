@@ -1,8 +1,16 @@
 // Virtual filesystem persisted in browser cache (localStorage).
 
-const STORAGE_KEY = "ubuntu-terminal-fs-v1";
+export const STORAGE_KEY = "ubuntu-terminal-fs-v1";
+export const DAILY_RESET_KEY = "ubuntu-terminal-last-reset-day-v1";
 
 export const HOME = "/home/student";
+
+export function localDayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function dir(children = {}) {
   return { type: "dir", children, mode: 0o755, mtime: Date.now() };
@@ -96,6 +104,7 @@ function defaultRoot() {
 export class VFS {
   constructor() {
     this.root = this.load();
+    this.ensureDailyReset();
   }
 
   load() {
@@ -124,6 +133,34 @@ export class VFS {
   reset() {
     this.root = defaultRoot();
     this.persist();
+  }
+
+  /**
+   * Restore the filesystem once when the browser's local calendar day changes.
+   * The first run only establishes today's marker so an existing user is not
+   * reset immediately when this feature is deployed.
+   */
+  ensureDailyReset(date = new Date()) {
+    if (typeof window === "undefined") return false;
+
+    const today = localDayKey(date);
+    try {
+      const lastResetDay = window.localStorage.getItem(DAILY_RESET_KEY);
+
+      if (lastResetDay === null) {
+        window.localStorage.setItem(DAILY_RESET_KEY, today);
+        return false;
+      }
+
+      if (lastResetDay === today) return false;
+
+      this.reset();
+      window.localStorage.setItem(DAILY_RESET_KEY, today);
+      return true;
+    } catch {
+      // Keep the in-memory terminal usable when browser storage is unavailable.
+      return false;
+    }
   }
 
   /**
