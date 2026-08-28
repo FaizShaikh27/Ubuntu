@@ -21,12 +21,14 @@ const isArray = (v) => typeof v === "object" && v !== null && "__array" in v;
 const HEADER_DECLS = {
   "stdio.h":    ["printf","fprintf","scanf","fscanf","puts","putchar","getchar","gets","fgets","fflush","perror","sprintf","sscanf","fopen","fclose","fread","fwrite","feof","ferror","rewind","fseek","ftell","fgets","fputs"],
   "stdlib.h":   ["exit","abort","malloc","calloc","realloc","free","atoi","atof","atol","rand","srand","abs","qsort","bsearch"],
-  "string.h":   ["strlen","strcpy","strncpy","strcat","strncat","strcmp","strncmp","strrev","memset","memcpy","memmove","strchr","strstr","strtok","strerror"],
+  "string.h":   ["strlen","strcpy","strncpy","strcat","strncat","strcmp","strncmp","strrev","strcspn","memset","memcpy","memmove","strchr","strstr","strtok","strerror"],
   "math.h":     ["sqrt","pow","fabs","floor","ceil","round","sin","cos","tan","asin","acos","atan","atan2","log","log2","log10","exp","fmod"],
   "unistd.h":   ["fork","getpid","getppid","sleep","usleep","pipe","close","read","write","exec","execl","execv","execvp","dup","dup2","chdir","getcwd","access","unlink","rmdir","lseek","getuid","getgid","geteuid","getegid"],
   "sys/types.h":[],
   "sys/stat.h": ["stat","lstat","fstat","chmod","mkdir","umask","mkfifo","S_ISDIR","S_ISREG","S_ISLNK","S_ISBLK","S_ISCHR","S_ISFIFO","S_ISSOCK"],
   "sys/wait.h": ["wait","waitpid","WIFEXITED","WEXITSTATUS","WIFSIGNALED","WTERMSIG"],
+  "sys/ipc.h":  ["ftok"],
+  "sys/msg.h":  ["msgget","msgsnd","msgrcv","msgctl"],
   "dirent.h":   ["opendir","readdir","closedir","rewinddir","scandir","alphasort"],
   "time.h":     ["time","clock","difftime","mktime","localtime","gmtime","strftime","ctime"],
   "ctype.h":    ["isdigit","isalpha","isalnum","isspace","isupper","islower","toupper","tolower","isprint","ispunct"],
@@ -147,7 +149,7 @@ const TYPES = new Set([
   // struct / union / enum keywords (consumed as a type token)
   "struct","union","enum",
   // common opaque pointer types used in practicals 6 & 7
-  "DIR","FILE","dirent","stat","timeval","timespec",
+  "DIR","FILE","dirent","stat","timeval","timespec","message",
 ]);
 
 class CParser {
@@ -161,6 +163,20 @@ class CParser {
   parseProgram() {
     const funcs = [];
     while (this.p < this.toks.length) {
+      // Skip a complete top-level struct/union definition. The previous
+      // semicolon-based skipper stopped at the first field and then tried to
+      // parse the closing brace as a function.
+      if ((this.is("struct") || this.is("union")) && this.is("{", 2)) {
+        this.p += 3;
+        let depth = 1;
+        while (this.peek() && depth > 0) {
+          if (this.eat("{")) depth++;
+          else if (this.eat("}")) depth--;
+          else this.p++;
+        }
+        this.eat(";");
+        continue;
+      }
       while (this.peek() && TYPES.has(this.peek().v) && !this.isFuncStart()) { while (this.peek() && !this.is(";")) this.p++; this.eat(";"); }
       if (this.p >= this.toks.length) break;
       funcs.push(this.parseFunction());
@@ -382,6 +398,16 @@ function fromString(s, size) {
   return { __array: arr };
 }
 
+// System V message queues are shared by every terminal interpreter instance,
+// matching the machine-wide behavior students expect from msgget(2).
+const messageQueues = new Map();
+let nextMessageQueueId = 1;
+
+function messageQueueById(id) {
+  for (const queue of messageQueues.values()) if (queue.id === id) return queue;
+  return null;
+}
+
 /* ------------------------------------------------------------------ */
 /* CInterpreter                                                        */
 /* ------------------------------------------------------------------ */
@@ -437,6 +463,8 @@ export class CInterpreter {
       // fcntl.h flags
       O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2,
       O_CREAT: 64, O_TRUNC: 512, O_APPEND: 1024, O_EXCL: 128,
+      // System V IPC flags and commands
+      IPC_CREAT: 0o1000, IPC_EXCL: 0o2000, IPC_NOWAIT: 0o4000, IPC_RMID: 0,
       // lseek whence
       SEEK_SET: 0, SEEK_CUR: 1, SEEK_END: 2,
       // stat mode type bits
@@ -613,7 +641,11 @@ export class CInterpreter {
           if (item.initList) { const values = []; for (const e of item.initList) values.push(await this.eval(e)); this.declare(item.name, { __array: values }); }
           else if (item.size !== undefined) { const n = toNum(await this.eval(item.size)); if (item.init) { const v = await this.eval(item.init); this.declare(item.name, typeof v === "string" ? fromString(v, n) : v); } else this.declare(item.name, { __array: new Array(Math.max(0, n)).fill(0) }); }
           else if (item.init) { const v = await this.eval(item.init); this.declare(item.name, stmt.type === "char" && typeof v === "string" ? fromString(v) : v); }
-          else if (item.name.length) { this.declare(item.name, stmt.type === "ptr" ? "" : 0); }
+          else if (item.name.length) {
+            if (stmt.type === "message") {
+              this.declare(item.name, { __struct: "message", __addr: ++this._structAddr, type: 0, text: fromString("", 100) });
+            } else this.declare(item.name, stmt.type === "ptr" ? "" : 0);
+          }
         }
         return;
       case "expr": await this.eval(stmt.e); return;
@@ -653,6 +685,17 @@ export class CInterpreter {
   async assignTo(target, value) {
     if (target.k === "var") { const existing = this.getVar(target.name); if (isArray(existing) && typeof value === "string") { const next = fromString(value, existing.__array.length); this.setVar(target.name, next); return next; } this.setVar(target.name, value); return value; }
     if (target.k === "index") { const base = await this.eval(target.base); const idx = toNum(await this.eval(target.index)); if (isArray(base)) { base.__array[idx] = value; return value; } return value; }
+    if (target.k === "field") {
+      const base = await this.eval(target.base);
+      if (base !== null && typeof base === "object" && !("__array" in base)) {
+        const existing = base[target.field];
+        base[target.field] = isArray(existing) && typeof value === "string"
+          ? fromString(value, existing.__array.length)
+          : value;
+        return base[target.field];
+      }
+      return value;
+    }
     if (target.k === "un" && target.op === "*") return this.assignTo(target.e, value);
     return value;
   }
@@ -722,6 +765,67 @@ export class CInterpreter {
     // User-defined functions take priority
     const user = this.funcs.get(name);
     if (user) { const args = []; for (const a of argExprs) args.push(await this.eval(a)); return this.callFunction(user, args); }
+
+    // ----------------------------------------------------------------
+    // System V message queues — Practical 9.2
+    // ----------------------------------------------------------------
+
+    if (name === "msgget") {
+      const key = toNum(await this.eval(argExprs[0]));
+      const flags = toNum(await this.eval(argExprs[1]));
+      let queue = messageQueues.get(key);
+      if (!queue && (flags & this.globals.IPC_CREAT)) {
+        queue = { id: nextMessageQueueId++, key, messages: [], waiters: [] };
+        messageQueues.set(key, queue);
+      }
+      return queue?.id ?? -1;
+    }
+
+    if (name === "msgsnd") {
+      const id = toNum(await this.eval(argExprs[0]));
+      const source = await this.eval(argExprs[1]);
+      const queue = messageQueueById(id);
+      if (!queue || !source || typeof source !== "object") return -1;
+      const message = { type: toNum(source.type) || 1, text: toStr(source.text) };
+      const waiterIndex = queue.waiters.findIndex((waiter) => waiter.type === 0 || waiter.type === message.type);
+      if (waiterIndex >= 0) {
+        const waiter = queue.waiters.splice(waiterIndex, 1)[0];
+        waiter.dest.type = message.type;
+        waiter.dest.text = fromString(message.text, 100);
+        waiter.resolve(message.text.length + 1);
+      } else queue.messages.push(message);
+      return 0;
+    }
+
+    if (name === "msgrcv") {
+      const id = toNum(await this.eval(argExprs[0]));
+      const dest = await this.eval(argExprs[1]);
+      const requestedType = toNum(await this.eval(argExprs[3]));
+      const flags = toNum(await this.eval(argExprs[4]));
+      const queue = messageQueueById(id);
+      if (!queue || !dest || typeof dest !== "object") return -1;
+      const index = queue.messages.findIndex((message) => requestedType === 0 || message.type === requestedType);
+      if (index >= 0) {
+        const message = queue.messages.splice(index, 1)[0];
+        dest.type = message.type;
+        dest.text = fromString(message.text, 100);
+        return message.text.length + 1;
+      }
+      if (flags & this.globals.IPC_NOWAIT) return -1;
+      return new Promise((resolve) => queue.waiters.push({ type: requestedType, dest, resolve }));
+    }
+
+    if (name === "msgctl") {
+      const id = toNum(await this.eval(argExprs[0]));
+      const command = toNum(await this.eval(argExprs[1]));
+      const queue = messageQueueById(id);
+      if (!queue) return -1;
+      if (command === this.globals.IPC_RMID) {
+        messageQueues.delete(queue.key);
+        for (const waiter of queue.waiters.splice(0)) waiter.resolve(-1);
+      }
+      return 0;
+    }
 
     // ----------------------------------------------------------------
     // Filesystem syscalls — Practicals 6 & 7
@@ -1077,6 +1181,7 @@ export class CInterpreter {
       case "strcat": return this.assignTo(argExprs[0], fromString(toStr(args[0]) + toStr(args[1])));
       case "strcmp": return toStr(args[0]) < toStr(args[1]) ? -1 : toStr(args[0]) > toStr(args[1]) ? 1 : 0;
       case "strrev": return this.assignTo(argExprs[0], fromString([...toStr(args[0])].reverse().join("")));
+      case "strcspn": { const s = toStr(args[0]); const reject = toStr(args[1]); let i = 0; while (i < s.length && !reject.includes(s[i])) i++; return i; }
       case "memset": if (isArray(args[0])) { args[0].__array.fill(n1); } return args[0];
       // math.h
       case "sqrt": return Math.sqrt(n0); case "pow": return Math.pow(n0, n1);
