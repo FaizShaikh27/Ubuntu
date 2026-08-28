@@ -1,43 +1,41 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <string.h>
 
-#define QUEUE_KEY 1234
-#define MESSAGE_SIZE 100
+#define KEY 1234
+#define SIZE 100
 
 struct message {
     long type;
-    char text[MESSAGE_SIZE];
+    char text[SIZE];
 };
 
-int main(void) {
-    int queue_id;
-    struct message message;
+int main() {
+    int msgid;
+    struct message msg;
 
-    queue_id = msgget(QUEUE_KEY, 0666 | IPC_CREAT);
-    if (queue_id == -1) {
-        perror("msgget");
-        return EXIT_FAILURE;
+    msg.type = 1;
+
+    // Get message queue
+    msgid = msgget(KEY, 0666 | IPC_CREAT);
+
+    if (msgid == -1) {
+        perror("msgget error");
+        return 1;
     }
 
-    message.type = 1;
     printf("Enter message: ");
-    fflush(stdout);
+    fgets(msg.text, SIZE, stdin);
 
-    if (fgets(message.text, sizeof(message.text), stdin) == NULL) {
-        fprintf(stderr, "Could not read the message.\n");
-        return EXIT_FAILURE;
+    // Send message
+    if (msgsnd(msgid, &msg, strlen(msg.text) + 1, 0) == -1) {
+        perror("msgsnd error");
+        return 1;
     }
 
-    message.text[strcspn(message.text, "\n")] = '\0';
+    printf("Message sent!\n");
 
-    if (msgsnd(queue_id, &message, strlen(message.text) + 1, 0) == -1) {
-        perror("msgsnd");
-        return EXIT_FAILURE;
-    }
-
-    printf("Message sent.\n");
-    return EXIT_SUCCESS;
+    return 0;
 }

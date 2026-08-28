@@ -3,39 +3,33 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 
-#define QUEUE_KEY 1234
-#define MESSAGE_SIZE 100
+#define KEY 1234
+#define SIZE 100
 
 struct message {
     long type;
-    char text[MESSAGE_SIZE];
+    char text[SIZE];
 };
 
-int main(void) {
-    int queue_id;
-    struct message message;
+int main() {
+    int msgid;
+    struct message msg;
 
-    queue_id = msgget(QUEUE_KEY, 0666 | IPC_CREAT);
-    if (queue_id == -1) {
-        perror("msgget");
-        return EXIT_FAILURE;
+    // Get message queue
+    msgid = msgget(KEY, 0666 | IPC_CREAT);
+
+    if (msgid == -1) {
+        perror("msgget error");
+        return 1;
     }
 
-    printf("Waiting for a type-1 message...\n");
-
-    if (msgrcv(queue_id, &message, sizeof(message.text), 1, 0) == -1) {
-        perror("msgrcv");
-        return EXIT_FAILURE;
+    // Receive message of type 1
+    if (msgrcv(msgid, &msg, sizeof(msg.text), 1, 0) == -1) {
+        perror("msgrcv error");
+        return 1;
     }
 
-    message.text[MESSAGE_SIZE - 1] = '\0';
-    printf("Received message: %s\n", message.text);
+    printf("Received message: %s\n", msg.text);
 
-    if (msgctl(queue_id, IPC_RMID, NULL) == -1) {
-        perror("msgctl(IPC_RMID)");
-        return EXIT_FAILURE;
-    }
-
-    printf("Message queue removed.\n");
-    return EXIT_SUCCESS;
+    return 0;
 }
