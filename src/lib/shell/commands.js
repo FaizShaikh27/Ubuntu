@@ -385,10 +385,13 @@ export const commands = {
     return 0;
   },
   chmod: (io, ctx) => {
-    const { rest } = splitFlags(io.args.slice(1));
-    const modeArg = rest.shift();
-    if (!modeArg || !rest.length) { io.err("chmod: missing operand\n"); return 1; }
-    for (const f of rest) {
+    // A symbolic mode may begin with `-` (for example `chmod -x file`), so it
+    // must not go through the generic option splitter.
+    const args = io.args.slice(1);
+    if (args[0] === "--") args.shift();
+    const modeArg = args.shift();
+    if (!modeArg || !args.length) { io.err("chmod: missing operand\n"); return 1; }
+    for (const f of args) {
       const path = abs(ctx, f); const node = ctx.fs.lookup(path);
       if (!node) { io.err(`chmod: cannot access '${f}': No such file or directory\n`); return 1; }
       let mode = node.mode;
@@ -716,6 +719,10 @@ function runTest(args, ctx) {
   switch (op) {
     case "=": case "==": return ok(matchGlob(r, l) || l === r);
     case "!=": return ok(l !== r);
+    case "=~": {
+      try { return ok(new RegExp(r).test(l)); }
+      catch { return 2; }
+    }
     case "-eq": return ok(Number(l) === Number(r));
     case "-ne": return ok(Number(l) !== Number(r));
     case "-lt": return ok(Number(l) < Number(r));

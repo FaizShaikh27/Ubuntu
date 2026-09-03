@@ -170,13 +170,22 @@ class Parser {
   }
 
   parsePipeline() {
+    // In Bash, `!` is a reserved word that negates the exit status of the
+    // complete pipeline which follows it.  Treating it as a regular word
+    // makes common conditions such as `if ! [[ ... ]]; then` try to execute
+    // a command literally named `!`.
+    let negate = false;
+    while (this.eat("!")) {
+      negate = !negate;
+      this.skipNlOnly();
+    }
     const cmds = [this.parseCommand()];
     while (this.eat("|")) {
       this.skipNl();
       cmds.push(this.parseCommand());
     }
-    if (cmds.length === 1) return cmds[0];
-    return { kind: "pipeline", cmds, redirs: [] };
+    const pipeline = cmds.length === 1 ? cmds[0] : { kind: "pipeline", cmds, redirs: [] };
+    return negate ? { kind: "not", command: pipeline } : pipeline;
   }
 
   parseRedirs(redirs) {
@@ -636,6 +645,11 @@ export async function execNode(node, ctx, sink) {
     }
     case "and": { const l = await execNode(node.left, ctx, sink); if (l !== 0) return l; return execNode(node.right, ctx, sink); }
     case "or": { const l = await execNode(node.left, ctx, sink); if (l === 0) return l; return execNode(node.right, ctx, sink); }
+    case "not": {
+      const status = await execNode(node.command, ctx, sink);
+      ctx.status = status === 0 ? 1 : 0;
+      return ctx.status;
+    }
     case "group": return execNode(node.body, ctx, sink);
     case "arith": { const v = evalArith(node.expr, ctx); ctx.status = v !== 0 ? 0 : 1; return ctx.status; }
     case "func": { ctx.funcs[node.name] = node.body; return 0; }
