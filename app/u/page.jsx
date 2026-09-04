@@ -71,6 +71,7 @@ function TerminalWorkspace() {
             <BookIcon className="size-4" />
             Lab Manual
           </a>
+          {/* Screenshot button temporarily disabled.
           <button
             type="button"
             onClick={takeScreenshot}
@@ -81,6 +82,7 @@ function TerminalWorkspace() {
             <CameraIcon className="size-4" />
             {takingScreenshot ? "Capturing…" : "Take Screenshot"}
           </button>
+          */}
           <button
             type="button"
             onClick={() => {
