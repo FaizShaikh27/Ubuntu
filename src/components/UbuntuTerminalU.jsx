@@ -218,8 +218,29 @@ export function UbuntuTerminalU({ sharedFs = null, label = null, instanceId = 0,
       setBlocks([]);
       return;
     }
+    if (event.ctrlKey && event.key.toLowerCase() === "z" && ctx.foregroundProcess) {
+      event.preventDefault();
+      const job = ctx.foregroundProcess;
+      void job.sendSignal(20).then(() => {
+        if (!job.suspended) return;
+        append({ kind: "out", text: `[1]+  Stopped                 ${job.label}\n` });
+        setBusy(false);
+        setInput("");
+        setCursorPos(0);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      });
+      return;
+    }
     if (event.ctrlKey && event.key.toLowerCase() === "c") {
       event.preventDefault();
+      if (ctx.foregroundProcess) {
+        append({ kind: "out", text: "^C\n" });
+        ctx.foregroundProcess.interrupt();
+        setBusy(false);
+        setInput("");
+        setCursorPos(0);
+        return;
+      }
       append({ kind: "prompt", path: displayPath(ctx.cwd), command: input + "^C" });
       setInput("");
       setCursorPos(0);

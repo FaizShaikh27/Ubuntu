@@ -28,6 +28,7 @@ export function createSession(host, sharedFs = null, instanceId = 0) {
     history: [],
     status: 0,
     exiting: false,
+    foregroundProcess: null,
     host,
     instanceId,
   };

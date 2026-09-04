@@ -518,6 +518,19 @@ export const commands = {
     return 0;
   },
   uptime: (io) => { io.out(` ${new Date().toTimeString().slice(0, 8)} up 1:12,  1 user,  load average: 0.08, 0.03, 0.01\n`); return 0; },
+  jobs: (io, ctx) => {
+    const job = ctx.foregroundProcess;
+    if (job?.suspended && !job.done) io.out(`[1]+  Stopped                 ${job.label}\n`);
+    return 0;
+  },
+  fg: async (io, ctx) => {
+    const job = ctx.foregroundProcess;
+    if (!job || job.done) { io.err("bash: fg: current: no such job\n"); return 1; }
+    io.out(`${job.label}\n`);
+    job.resume();
+    await job.waitForStopOrDone();
+    return 0;
+  },
   ps: (io) => {
     const { flags } = splitFlags(io.args.slice(1));
     const procs = globalProcessTable.snapshot();

@@ -29,6 +29,9 @@ const HEADER_DECLS = {
   "sys/wait.h": ["wait","waitpid","WIFEXITED","WEXITSTATUS","WIFSIGNALED","WTERMSIG"],
   "sys/ipc.h":  ["ftok"],
   "sys/msg.h":  ["msgget","msgsnd","msgrcv","msgctl"],
+  "sys/sem.h":  ["semget","semctl","semop"],
+  "sys/mman.h": ["mmap","munmap"],
+  "semaphore.h": ["sem_init","sem_wait","sem_post","sem_destroy"],
   "dirent.h":   ["opendir","readdir","closedir","rewinddir","scandir","alphasort"],
   "time.h":     ["time","clock","difftime","mktime","localtime","gmtime","strftime","ctime"],
   "ctype.h":    ["isdigit","isalpha","isalnum","isspace","isupper","islower","toupper","tolower","isprint","ispunct"],
@@ -144,12 +147,12 @@ const TYPES = new Set([
   "const","volatile","static","extern","register","auto","inline","typedef",
   // POSIX typedef'd scalar types
   "pid_t","size_t","ssize_t","off_t","ino_t","mode_t","nlink_t","uid_t","gid_t",
-  "dev_t","blksize_t","blkcnt_t","time_t","clock_t","socklen_t","uint8_t",
+  "dev_t","blksize_t","blkcnt_t","time_t","clock_t","socklen_t","key_t","sem_t","uint8_t",
   "uint16_t","uint32_t","int8_t","int16_t","int32_t",
   // struct / union / enum keywords (consumed as a type token)
   "struct","union","enum",
   // common opaque pointer types used in practicals 6 & 7
-  "DIR","FILE","dirent","stat","timeval","timespec","message",
+  "DIR","FILE","dirent","stat","timeval","timespec","message","sembuf","semid_ds","semun",
 ]);
 
 class CParser {
@@ -163,9 +166,41 @@ class CParser {
   parseProgram() {
     const funcs = [];
     while (this.p < this.toks.length) {
-      // Skip a complete top-level struct/union definition. The previous
-      // semicolon-based skipper stopped at the first field and then tried to
-      // parse the closing brace as a function.
+      // Skip complete aggregate definitions, including anonymous typedefs
+      // such as `typedef struct { ... } shared_data;`, and remember their
+      // names so declarations using the new type parse normally.
+      const typedefOffset = this.is("typedef") ? 1 : 0;
+      if (this.is("struct", typedefOffset) || this.is("union", typedefOffset)) {
+        let braceOffset = typedefOffset + 1;
+        let tagName = null;
+        if (this.peek(braceOffset)?.t === "id") {
+          tagName = this.peek(braceOffset).v;
+          braceOffset++;
+        }
+        if (!this.is("{", braceOffset)) {
+          // This is a declaration rather than a definition; let the regular
+          // declaration/function parser handle it below.
+        } else {
+          this.p += braceOffset + 1;
+          let depth = 1;
+          while (this.peek() && depth > 0) {
+            if (this.eat("{")) depth++;
+            else if (this.eat("}")) depth--;
+            else this.p++;
+          }
+          let aliasName = null;
+          if (this.peek()?.t === "id") {
+            aliasName = this.peek().v;
+            this.p++;
+          }
+          this.eat(";");
+          if (tagName) TYPES.add(tagName);
+          if (aliasName) TYPES.add(aliasName);
+          continue;
+        }
+      }
+      // Retain support for the older `struct name { ... };` path if unusual
+      // tokens placed the opening brace outside the detection window above.
       if ((this.is("struct") || this.is("union")) && this.is("{", 2)) {
         this.p += 3;
         let depth = 1;
@@ -363,6 +398,9 @@ class ForkSignal {
 class ReturnValue { constructor(value) { this.value = value; } }
 class BreakErr {}
 class ContinueErr {}
+export class ProcessInterrupted extends Error {
+  constructor() { super("process interrupted"); this.name = "ProcessInterrupted"; }
+}
 
 function toNum(v) {
   if (v === undefined || v === null) return 0;
@@ -402,6 +440,35 @@ function fromString(s, size) {
 // matching the machine-wide behavior students expect from msgget(2).
 const messageQueues = new Map();
 let nextMessageQueueId = 1;
+
+const systemVSemaphores = new Map();
+let nextSystemVSemaphoreId = 1;
+
+function makeSemaphore(value = 0) {
+  return { __semaphore: true, value: Math.max(0, toNum(value)), waiters: [], initialized: false };
+}
+
+function systemVSemaphoreById(id) {
+  for (const semaphore of systemVSemaphores.values()) if (semaphore.id === id) return semaphore;
+  return null;
+}
+
+async function waitSemaphore(semaphore) {
+  if (!semaphore?.__semaphore) return -1;
+  if (semaphore.value > 0) {
+    semaphore.value--;
+    return 0;
+  }
+  return new Promise((resolve) => semaphore.waiters.push(() => resolve(0)));
+}
+
+function postSemaphore(semaphore) {
+  if (!semaphore?.__semaphore) return -1;
+  const waiter = semaphore.waiters.shift();
+  if (waiter) waiter();
+  else semaphore.value++;
+  return 0;
+}
 
 function messageQueueById(id) {
   for (const queue of messageQueues.values()) if (queue.id === id) return queue;
@@ -453,6 +520,14 @@ export class CInterpreter {
     // Last errno set by a syscall (used by perror())
     this._lastErrno = 0;
 
+    // MAP_SHARED allocations are replayed when the simulator re-runs main()
+    // for the child and parent sides of fork(). Both sides receive the same
+    // objects, which lets POSIX semaphores coordinate real async execution.
+    this._sharedMappings = opts.sharedMappings ?? [];
+    this._mappingCursor = 0;
+    this.control = opts.control ?? null;
+    this.signalHandlers = new Map();
+
     // Pre-defined C constants injected as globals so code using them works
     // without explicit #define (common in simple teaching programs).
     this.globals = {
@@ -465,6 +540,13 @@ export class CInterpreter {
       O_CREAT: 64, O_TRUNC: 512, O_APPEND: 1024, O_EXCL: 128,
       // System V IPC flags and commands
       IPC_CREAT: 0o1000, IPC_EXCL: 0o2000, IPC_NOWAIT: 0o4000, IPC_RMID: 0,
+      GETVAL: 12, SETVAL: 16,
+      // mmap flags/protection values
+      PROT_NONE: 0, PROT_READ: 1, PROT_WRITE: 2, PROT_EXEC: 4,
+      MAP_SHARED: 1, MAP_PRIVATE: 2, MAP_ANONYMOUS: 0x20, MAP_ANON: 0x20,
+      MAP_FAILED: -1,
+      // common signal constants
+      SIG_DFL: 0, SIG_IGN: 1, SIGCONT: 18, SIGTSTP: 20,
       // lseek whence
       SEEK_SET: 0, SEEK_CUR: 1, SEEK_END: 2,
       // stat mode type bits
@@ -543,6 +625,10 @@ export class CInterpreter {
         // ---- Dual-run fork simulation ----
         return this._runFork(main, args, argv);
       }
+      if (e instanceof ProcessInterrupted) {
+        this.processTable.remove(this.pid);
+        return 130;
+      }
       this.io.err(`runtime error: ${e.message}\n`);
       this.processTable.remove(this.pid);
       return 1;
@@ -553,6 +639,8 @@ export class CInterpreter {
    * Orchestrate the child run followed by the parent run after fork().
    */
   async _runFork(main, args, argv) {
+    if (this._sharedMappings.length > 0) return this._runSharedMemoryFork(main, args);
+
     // Allocate child PID
     const childPid = this.processTable.alloc(this.pid, this.execName);
 
@@ -564,6 +652,8 @@ export class CInterpreter {
       forkMode:     "child",
       forkChildPid: 0,
       execName:     this.execName,
+      fs:           this.vfs,
+      cwd:          this.cwd,
     });
     // Share parsed functions and a copy of globals
     childInterp.funcs = this.funcs;
@@ -614,6 +704,74 @@ export class CInterpreter {
     }
   }
 
+  /**
+   * Run both sides concurrently when memory was mapped before fork(). This is
+   * needed for producer/consumer programs: the child can wait on `full` while
+   * the parent posts an item, and both see the same buffer and indices.
+   */
+  async _runSharedMemoryFork(main, args) {
+    const childPid = this.processTable.alloc(this.pid, this.execName);
+    const inheritedGlobals = { ...this.globals };
+    const childInterp = new CInterpreter(this.io, {
+      processTable: this.processTable,
+      pid: childPid,
+      ppid: this.pid,
+      forkMode: "child",
+      forkChildPid: 0,
+      execName: this.execName,
+      fs: this.vfs,
+      cwd: this.cwd,
+      sharedMappings: this._sharedMappings,
+    });
+    childInterp.funcs = this.funcs;
+    childInterp.declaredFunctions = this.declaredFunctions;
+    childInterp.globals = { ...inheritedGlobals };
+    childInterp._mappingCursor = 0;
+
+    this.scopes = [];
+    this.globals = { ...inheritedGlobals };
+    this.inputBuffer = [];
+    this.steps = 0;
+    this.forkMode = "parent";
+    this.forkChildPid = childPid;
+    this.forkCallCount = 0;
+    this._mappingCursor = 0;
+
+    const childArgv = { __array: args.map((a) => a) };
+    const childPromise = (async () => {
+      let status = 0;
+      try {
+        status = toNum(await childInterp.callFunction(main, [args.length, childArgv])) & 0xff;
+      } catch (error) {
+        if (error instanceof ReturnValue) status = toNum(error.value) & 0xff;
+        else {
+          this.io.err(`child process error: ${error.message}\n`);
+          status = 1;
+        }
+      }
+      this.processTable.markZombie(childPid, status);
+      return status;
+    })();
+    this._childCompletion = childPromise;
+
+    let parentStatus = 0;
+    try {
+      const parentArgv = { __array: args.map((a) => a) };
+      parentStatus = toNum(await this.callFunction(main, [args.length, parentArgv])) & 0xff;
+    } catch (error) {
+      if (error instanceof ReturnValue) parentStatus = toNum(error.value) & 0xff;
+      else {
+        this.io.err(`runtime error: ${error.message}\n`);
+        parentStatus = 1;
+      }
+    } finally {
+      await childPromise;
+      this._childCompletion = null;
+      this.processTable.remove(this.pid);
+    }
+    return parentStatus;
+  }
+
   async callFunction(fn, args) {
     const scope = {};
     fn.params.forEach((p, i) => (scope[p.name] = args[i] ?? 0));
@@ -621,6 +779,16 @@ export class CInterpreter {
     try { await this.execStmt(fn.body); return 0; }
     catch (e) { if (e instanceof ReturnValue) return e.value; throw e; }
     finally { this.scopes.pop(); }
+  }
+
+  async deliverSignal(signalNumber) {
+    const handler = this.signalHandlers.get(signalNumber);
+    if (handler === this.globals.SIG_IGN) return 0;
+    if (typeof handler === "string" && this.funcs.has(handler)) {
+      return this.callFunction(this.funcs.get(handler), [signalNumber]);
+    }
+    if (signalNumber === this.globals.SIGTSTP) this.control?.pause();
+    return 0;
   }
 
   lookupScope(name) {
@@ -633,6 +801,7 @@ export class CInterpreter {
   setVar(name, value) { const s = this.lookupScope(name); if (s) s[name] = value; else if (this.scopes.length) this.scopes[this.scopes.length - 1][name] = value; else this.globals[name] = value; }
 
   async execStmt(stmt) {
+    await this.control?.checkpoint();
     if (++this.steps > 3_000_000) throw new Error("program exceeded the execution limit");
     switch (stmt.k) {
       case "block": for (const s of stmt.body) await this.execStmt(s); return;
@@ -644,6 +813,10 @@ export class CInterpreter {
           else if (item.name.length) {
             if (stmt.type === "message") {
               this.declare(item.name, { __struct: "message", __addr: ++this._structAddr, type: 0, text: fromString("", 100) });
+            } else if (stmt.type === "semun") {
+              this.declare(item.name, { __struct: "semun", __addr: ++this._structAddr, val: 0 });
+            } else if (stmt.type === "sem_t") {
+              this.declare(item.name, makeSemaphore(0));
             } else this.declare(item.name, stmt.type === "ptr" ? "" : 0);
           }
         }
@@ -701,6 +874,7 @@ export class CInterpreter {
   }
 
   async eval(e) {
+    await this.control?.checkpoint();
     if (++this.steps > 3_000_000) throw new Error("program exceeded the execution limit");
     switch (e.k) {
       case "num": return e.v;
@@ -765,6 +939,113 @@ export class CInterpreter {
     // User-defined functions take priority
     const user = this.funcs.get(name);
     if (user) { const args = []; for (const a of argExprs) args.push(await this.eval(a)); return this.callFunction(user, args); }
+
+    // ----------------------------------------------------------------
+    // System V semaphores
+    // ----------------------------------------------------------------
+
+    if (name === "semget") {
+      const key = toNum(await this.eval(argExprs[0]));
+      const flags = toNum(await this.eval(argExprs[2]));
+      let semaphore = systemVSemaphores.get(key);
+      if (!semaphore && (flags & this.globals.IPC_CREAT)) {
+        semaphore = { id: nextSystemVSemaphoreId++, key, sets: [makeSemaphore(0)] };
+        systemVSemaphores.set(key, semaphore);
+      }
+      return semaphore?.id ?? -1;
+    }
+
+    if (name === "semctl") {
+      const id = toNum(await this.eval(argExprs[0]));
+      const index = toNum(await this.eval(argExprs[1]));
+      const command = toNum(await this.eval(argExprs[2]));
+      const semaphore = systemVSemaphoreById(id);
+      if (!semaphore) return -1;
+      const target = semaphore.sets[index];
+      if (!target) return -1;
+      if (command === this.globals.SETVAL) {
+        const unionArg = await this.eval(argExprs[3]);
+        target.value = Math.max(0, toNum(unionArg?.val ?? unionArg));
+        return 0;
+      }
+      if (command === this.globals.GETVAL) return target.value;
+      if (command === this.globals.IPC_RMID) {
+        systemVSemaphores.delete(semaphore.key);
+        return 0;
+      }
+      return 0;
+    }
+
+    if (name === "semop") {
+      const id = toNum(await this.eval(argExprs[0]));
+      const operation = await this.eval(argExprs[1]);
+      const semaphore = systemVSemaphoreById(id);
+      if (!semaphore || !isArray(operation)) return -1;
+      const index = toNum(operation.__array[0]);
+      const delta = toNum(operation.__array[1]);
+      const target = semaphore.sets[index];
+      if (!target) return -1;
+      if (delta < 0) {
+        for (let i = 0; i < Math.abs(delta); i++) {
+          const status = await waitSemaphore(target);
+          if (status !== 0) return status;
+        }
+      } else {
+        for (let i = 0; i < delta; i++) postSemaphore(target);
+      }
+      return 0;
+    }
+
+    // ----------------------------------------------------------------
+    // POSIX shared memory and unnamed semaphores
+    // ----------------------------------------------------------------
+
+    if (name === "mmap") {
+      const existing = this._sharedMappings[this._mappingCursor++];
+      if (existing) return existing;
+      const mapping = {
+        __struct: "shared_memory",
+        __addr: ++this._structAddr,
+        buffer: { __array: new Array(64).fill(0) },
+        in: 0,
+        out: 0,
+        empty: makeSemaphore(0),
+        full: makeSemaphore(0),
+        mutex: makeSemaphore(0),
+      };
+      this._sharedMappings.push(mapping);
+      return mapping;
+    }
+
+    if (name === "munmap") return 0;
+
+    if (name === "sem_init") {
+      const targetExpr = argExprs[0];
+      let semaphore = await this.eval(targetExpr);
+      if (!semaphore?.__semaphore) {
+        semaphore = makeSemaphore(0);
+        const destination = targetExpr?.k === "un" && targetExpr.op === "&" ? targetExpr.e : targetExpr;
+        if (destination) await this.assignTo(destination, semaphore);
+      }
+      // Re-running main() is how this interpreter models fork(). A semaphore
+      // in MAP_SHARED memory has already been initialized before fork and must
+      // not be reset independently by the child/parent replay.
+      if (!semaphore.initialized) {
+        semaphore.value = Math.max(0, toNum(await this.eval(argExprs[2])));
+        semaphore.waiters.length = 0;
+        semaphore.initialized = true;
+      }
+      return 0;
+    }
+
+    if (name === "sem_wait") return waitSemaphore(await this.eval(argExprs[0]));
+    if (name === "sem_post") return postSemaphore(await this.eval(argExprs[0]));
+    if (name === "sem_destroy") {
+      const semaphore = await this.eval(argExprs[0]);
+      if (!semaphore?.__semaphore) return -1;
+      semaphore.waiters.length = 0;
+      return 0;
+    }
 
     // ----------------------------------------------------------------
     // System V message queues — Practical 9.2
@@ -1082,6 +1363,27 @@ export class CInterpreter {
     // Process simulation syscalls (Practical 8)
     // ----------------------------------------------------------------
 
+    if (name === "signal") {
+      const signalNumber = toNum(await this.eval(argExprs[0]));
+      const handlerExpr = argExprs[1];
+      const handler = handlerExpr?.k === "var" && this.funcs.has(handlerExpr.name)
+        ? handlerExpr.name
+        : toNum(await this.eval(handlerExpr));
+      const previous = this.signalHandlers.get(signalNumber) ?? this.globals.SIG_DFL;
+      this.signalHandlers.set(signalNumber, handler);
+      return previous;
+    }
+
+    if (name === "raise") {
+      return this.deliverSignal(toNum(await this.eval(argExprs[0])));
+    }
+
+    if (name === "kill") {
+      const pid = toNum(await this.eval(argExprs[0]));
+      const signalNumber = toNum(await this.eval(argExprs[1]));
+      return pid === this.pid ? this.deliverSignal(signalNumber) : -1;
+    }
+
     if (name === "fork") {
       if (this.forkMode === "child") {
         // We're in the child re-run — return 0
@@ -1106,6 +1408,7 @@ export class CInterpreter {
     }
 
     if (name === "wait" || name === "waitpid") {
+      if (this._childCompletion) await this._childCompletion;
       // Reap a zombie child
       const reaped = this.processTable.reap(this.pid);
       if (reaped > 0) {
