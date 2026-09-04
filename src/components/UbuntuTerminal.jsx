@@ -14,7 +14,7 @@ function makeBanner(terminalId) {
     ` * Practicals:     bash scripting, coreutils and gcc all work offline`,
     ` * Storage:        files you create are cached in this browser`,
     "",
-    `Last login: ${new Date().toString().replace(/GMT.*/, "")}on pts/${terminalId}`,
+    `Last login: just now on pts/${terminalId}`,
     "",
   ];
   return lines.join("\n");
@@ -48,6 +48,24 @@ export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, 
   const inputRef = useRef(null);
   const readResolver = useRef(null);
   const [cwdLabel, setCwdLabel] = useState("~");
+
+  // Keep keyboard input ready on mount, after returning from nano, and when
+  // the workspace explicitly activates this pane (for example after split).
+  useEffect(() => {
+    const focusInput = () => {
+      if (!editor && !closed) inputRef.current?.focus({ preventScroll: true });
+    };
+    const onFocusRequest = (event) => {
+      if (event.detail?.instanceId === instanceId) requestAnimationFrame(focusInput);
+    };
+    requestAnimationFrame(focusInput);
+    window.addEventListener("ubuntu-terminal-focus", onFocusRequest);
+    window.addEventListener("focus", focusInput);
+    return () => {
+      window.removeEventListener("ubuntu-terminal-focus", onFocusRequest);
+      window.removeEventListener("focus", focusInput);
+    };
+  }, [closed, editor, instanceId]);
 
   const updateCursorPos = useCallback(() => {
     if (inputRef.current) {
@@ -362,7 +380,7 @@ export function UbuntuTerminal({ sharedFs = null, label = null, instanceId = 0, 
             <textarea
               ref={inputRef}
               value={input}
-              autoFocus={instanceId === 0}
+              autoFocus
               spellCheck={false}
               autoCapitalize="none"
               autoCorrect="off"

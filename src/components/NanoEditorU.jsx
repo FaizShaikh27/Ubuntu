@@ -45,11 +45,14 @@ export function NanoEditorU({ path, initialText, onSave, onClose, onWriteMsg }) 
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
 
-  // Focus the prompt input whenever mode switches to a prompt mode
+  // Focus nano immediately when it opens, then move focus between the editor
+  // and nano's prompts without requiring an extra click.
   useEffect(() => {
-    if (mode !== "edit") {
-      requestAnimationFrame(() => promptRef.current?.focus());
-    }
+    const target = mode === "edit" ? textareaRef : promptRef;
+    const focusTarget = () => target.current?.focus({ preventScroll: true });
+    requestAnimationFrame(focusTarget);
+    window.addEventListener("focus", focusTarget);
+    return () => window.removeEventListener("focus", focusTarget);
   }, [mode]);
 
   // ── Ctrl+K: cut current line ───────────────────────────────────────────────

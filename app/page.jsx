@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { UbuntuTerminal } from "@/src/components/UbuntuTerminal";
 import { VFS } from "@/src/lib/shell/fs.js";
 import { useMidnightHardReset } from "@/src/hooks/use-midnight-hard-reset.js";
+import { downloadTerminalScreenshot } from "@/src/lib/download-terminal-screenshot.js";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,38 @@ export const dynamic = "force-dynamic";
  */
 function TerminalWorkspace() {
   const [split, setSplit] = useState(false);
+  const [takingScreenshot, setTakingScreenshot] = useState(false);
+  const terminalGridRef = useRef(null);
 
   // Create one shared VFS instance at the workspace level.
   // useMemo with [] ensures it is only created once.
   const sharedFs = useMemo(() => new VFS(), []);
   useMidnightHardReset(sharedFs);
+
+  const toggleSplit = () => {
+    setSplit((current) => {
+      const next = !current;
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new CustomEvent("ubuntu-terminal-focus", { detail: { instanceId: next ? 1 : 0 } }));
+      });
+      return next;
+    });
+  };
+
+  const takeScreenshot = async () => {
+    if (takingScreenshot) return;
+    setTakingScreenshot(true);
+    try {
+      await downloadTerminalScreenshot(terminalGridRef.current);
+    } catch (error) {
+      window.alert(`Unable to take terminal screenshot: ${error.message}`);
+    } finally {
+      setTakingScreenshot(false);
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new CustomEvent("ubuntu-terminal-focus", { detail: { instanceId: split ? 1 : 0 } }));
+      });
+    }
+  };
 
   return (
     <div className="flex flex-col gap-3 flex-1 min-h-0">
@@ -31,6 +59,26 @@ function TerminalWorkspace() {
             : "Single terminal — click Split to open a second terminal side-by-side."}
         </p>
         <div className="flex items-center gap-2">
+          <a
+            href="/Operating_System_Lab_Manual.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-lg border border-term-blue/40 bg-term-blue/10 px-3 py-1.5 text-sm font-medium text-term-blue hover:bg-term-blue/20 transition-all duration-200"
+            title="Open the Operating Systems lab manual"
+          >
+            <BookIcon className="size-4" />
+            Lab Manual
+          </a>
+          <button
+            type="button"
+            onClick={takeScreenshot}
+            disabled={takingScreenshot}
+            className="flex items-center gap-1.5 rounded-lg border border-term-yellow/40 bg-term-yellow/10 px-3 py-1.5 text-sm font-medium text-term-yellow hover:bg-term-yellow/20 transition-all duration-200 disabled:cursor-wait disabled:opacity-60"
+            title="Download a screenshot of the terminal area"
+          >
+            <CameraIcon className="size-4" />
+            {takingScreenshot ? "Capturing…" : "Take Screenshot"}
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -55,7 +103,7 @@ function TerminalWorkspace() {
           </button>
           <button
             type="button"
-            onClick={() => setSplit((s) => !s)}
+            onClick={toggleSplit}
             className={[
               "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all duration-200",
               split
@@ -80,6 +128,7 @@ function TerminalWorkspace() {
 
       {/* ── Terminal pane(s) ── */}
       <div
+        ref={terminalGridRef}
         className={[
           "grid gap-3 flex-1 min-h-0",
           split ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1",
@@ -151,6 +200,24 @@ function SplitIcon({ className = "" }) {
     >
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <line x1="12" y1="3" x2="12" y2="21" />
+    </svg>
+  );
+}
+
+function BookIcon({ className = "" }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+    </svg>
+  );
+}
+
+function CameraIcon({ className = "" }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M14.5 4 16 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-3Z" />
+      <circle cx="12" cy="13" r="3" />
     </svg>
   );
 }
