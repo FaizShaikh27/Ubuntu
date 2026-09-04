@@ -154,28 +154,6 @@ function TerminalWorkspace() {
         )}
       </div>
 
-      {/* ── Feature cards ── */}
-      <section className="features-section">
-        {[
-          {
-            title: "Shell scripting",
-            body: "Variables, if/for/while, functions, pipes, redirection, globs, $(...) and arithmetic.",
-          },
-          {
-            title: "C practicals",
-            body: "gcc hello.c -o hello then ./hello — printf, scanf, fork, wait, getpid all work correctly.",
-          },
-          {
-            title: "Process simulation",
-            body: "fork(), zombie & orphan processes, ps -el | grep Z — OS Practical 8 fully supported.",
-          },
-        ].map((card) => (
-          <article key={card.title} className="feature-card">
-            <h2 className="card-title">{card.title}</h2>
-            <p className="card-body">{card.body}</p>
-          </article>
-        ))}
-      </section>
     </div>
   );
 }
