@@ -1,3 +1,4 @@
+import { cleanupIPC } from "./ipc.js";
 import { CInterpreter, ProcessInterrupted } from "./minic.js";
 import { execNode, parse } from "./interpreter.js";
 import { globalProcessTable } from "./process-table.js";
@@ -99,9 +100,7 @@ export async function runExecutable(path, io, ctx) {
     // Derive the executable name from the path for ps output
     const execName = path.split("/").pop() ?? "a.out";
 
-    // Reset the process table for a fresh program run so we don't accumulate
-    // stale entries from previous executions in the same terminal session.
-    globalProcessTable.reset();
+    // Concurrent terminal panes must retain each other's process entries.
 
     // Allocate a PID for this process (parent = init, PID 1)
     const pid = globalProcessTable.alloc(1, execName);
@@ -132,6 +131,7 @@ export async function runExecutable(path, io, ctx) {
     try {
       return await interp.run(io.args);
     } finally {
+      cleanupIPC(interp);
       control.finish();
       if (ctx.foregroundProcess === control) ctx.foregroundProcess = null;
     }

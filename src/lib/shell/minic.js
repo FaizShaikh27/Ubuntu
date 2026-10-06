@@ -3,13 +3,14 @@
  * variables, arrays, pointers-lite, control flow, functions, printf/scanf,
  * string.h, math.h and POSIX filesystem helpers.
  *
- * Supports OS practicals 6–8:
+ * Supports OS practicals 6–12, including IPC sockets and shared memory:
  *   Practical 6 — stat(), S_ISDIR/S_ISREG, file metadata
  *   Practical 7 — opendir(), readdir(), closedir(), struct dirent
  *   Practical 8 — fork(), wait(), zombie/orphan process simulation
  */
 
 import { globalProcessTable } from "./process-table.js";
+import { callIPC, cleanupIPC } from "./ipc.js";
 
 const isArray = (v) => typeof v === "object" && v !== null && "__array" in v;
 
@@ -28,6 +29,9 @@ const HEADER_DECLS = {
   "sys/stat.h": ["stat","lstat","fstat","chmod","mkdir","umask","mkfifo","S_ISDIR","S_ISREG","S_ISLNK","S_ISBLK","S_ISCHR","S_ISFIFO","S_ISSOCK"],
   "sys/wait.h": ["wait","waitpid","WIFEXITED","WEXITSTATUS","WIFSIGNALED","WTERMSIG"],
   "sys/ipc.h":  ["ftok"],
+  "sys/socket.h": ["socket","bind","listen","accept","connect"],
+  "sys/un.h": [],
+  "sys/shm.h": ["shmget","shmat","shmdt","shmctl"],
   "sys/msg.h":  ["msgget","msgsnd","msgrcv","msgctl"],
   "sys/sem.h":  ["semget","semctl","semop"],
   "sys/mman.h": ["mmap","munmap"],
@@ -152,7 +156,7 @@ const TYPES = new Set([
   // struct / union / enum keywords (consumed as a type token)
   "struct","union","enum",
   // common opaque pointer types used in practicals 6 & 7
-  "DIR","FILE","dirent","stat","timeval","timespec","message","sembuf","semid_ds","semun",
+  "DIR","FILE","dirent","stat","timeval","timespec","message","sembuf","semid_ds","semun","sockaddr","sockaddr_un",
 ]);
 
 class CParser {
@@ -303,7 +307,11 @@ class CParser {
 
   parseDecl() {
     let type = "int";
-    while (this.peek() && TYPES.has(this.peek().v)) { type = this.peek().v; this.p++; }
+    // A variable may have the same spelling as a struct tag (char message[]).
+    while (this.peek() && TYPES.has(this.peek().v) &&
+           !["[", "=", ",", ";", ")"].includes(this.peek(1)?.v)) {
+      type = this.peek().v; this.p++;
+    }
     const items = [];
     do {
       while (this.eat("*")) type = "ptr";
@@ -539,6 +547,7 @@ export class CInterpreter {
       O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2,
       O_CREAT: 64, O_TRUNC: 512, O_APPEND: 1024, O_EXCL: 128,
       // System V IPC flags and commands
+      AF_UNIX: 1, SOCK_STREAM: 1, IPC_PRIVATE: 0,
       IPC_CREAT: 0o1000, IPC_EXCL: 0o2000, IPC_NOWAIT: 0o4000, IPC_RMID: 0,
       GETVAL: 12, SETVAL: 16,
       // mmap flags/protection values
@@ -673,6 +682,7 @@ export class CInterpreter {
         this.processTable.markZombie(childPid, 1);
       }
     }
+    cleanupIPC(childInterp);
     // If child didn't throw ReturnValue, it fell off the end — exit(0)
     if (this.processTable.procs.get(childPid)?.state === "R") {
       this.processTable.markZombie(childPid, 0);
@@ -681,7 +691,7 @@ export class CInterpreter {
     // ---- Parent run ----
     // Reset state for re-execution as parent
     this.scopes = [];
-    this.globals = {};
+    // Keep predefined constants when replaying the parent after fork().
     this.inputBuffer = [];
     this.steps = 0;
     this.forkMode = "parent";
@@ -815,6 +825,8 @@ export class CInterpreter {
               this.declare(item.name, { __struct: "message", __addr: ++this._structAddr, type: 0, text: fromString("", 100) });
             } else if (stmt.type === "semun") {
               this.declare(item.name, { __struct: "semun", __addr: ++this._structAddr, val: 0 });
+            } else if (stmt.type === "sockaddr_un") {
+              this.declare(item.name, { __struct: "sockaddr_un", __addr: ++this._structAddr, sun_family: 0, sun_path: fromString("", 108) });
             } else if (stmt.type === "sem_t") {
               this.declare(item.name, makeSemaphore(0));
             } else this.declare(item.name, stmt.type === "ptr" ? "" : 0);
@@ -939,6 +951,15 @@ export class CInterpreter {
     // User-defined functions take priority
     const user = this.funcs.get(name);
     if (user) { const args = []; for (const a of argExprs) args.push(await this.eval(a)); return this.callFunction(user, args); }
+
+    if (name === "sizeof") {
+      const value = await this.eval(argExprs[0]);
+      if (isArray(value)) return value.__array.length;
+      if (value?.__struct === "sockaddr_un") return 110;
+      return 4;
+    }
+    const ipcResult = await callIPC(this, name, argExprs, { toNum, toStr });
+    if (ipcResult !== undefined) return ipcResult;
 
     // ----------------------------------------------------------------
     // System V semaphores
@@ -1243,6 +1264,10 @@ export class CInterpreter {
       const fd    = toNum(await this.eval(argExprs[0]));
       const bufExpr = argExprs[1];
       const count = toNum(await this.eval(argExprs[2] ?? { k: "num", v: 0 }));
+      if (this._fdTable.get(fd)?.type === "socket") {
+        const buffer = await this.eval(bufExpr);
+        return callIPC(this, name, [], { toNum, toStr }, [fd, buffer, count]);
+      }
       if (fd === 0) {
         // stdin
         const line = (await this.io.readLine()) ?? "";
@@ -1265,6 +1290,9 @@ export class CInterpreter {
       const fd    = toNum(await this.eval(argExprs[0]));
       const buf   = await this.eval(argExprs[1]);
       const count = toNum(await this.eval(argExprs[2] ?? { k: "num", v: 0 }));
+      if (this._fdTable.get(fd)?.type === "socket") {
+        return callIPC(this, name, [], { toNum, toStr }, [fd, buf, count]);
+      }
       const text  = toStr(buf).slice(0, count);
       if (fd === 1) { this.io.out(text); return text.length; }
       if (fd === 2) { this.io.err(text); return text.length; }
@@ -1283,6 +1311,9 @@ export class CInterpreter {
     // close() — already handled in unistd.h section for fork; also handle fd close
     if (name === "close" && argExprs.length >= 1) {
       const fd = toNum(await this.eval(argExprs[0]));
+      if (this._fdTable.get(fd)?.type === "socket") {
+        return callIPC(this, name, [], { toNum, toStr }, [fd]);
+      }
       if (fd >= 3) {
         const entry = this._fdTable.get(fd);
         // If this is a writable FIFO fd, flush the accumulated content to the FIFO buffer
@@ -1420,7 +1451,8 @@ export class CInterpreter {
 
     if (name === "perror") {
       const msg = toStr(await this.eval(argExprs[0]));
-      this.io.err(`${msg}: ${this._lastErrno ? "No such file or directory" : "Success"}\n`);
+      const messages = { 0: "Success", 2: "No such file or directory", 9: "Bad file descriptor", 17: "File exists", 21: "Is a directory", 22: "Invalid argument", 32: "Broken pipe", 98: "Address already in use", 107: "Transport endpoint is not connected", 111: "Connection refused" };
+      this.io.err(`${msg}: ${messages[this._lastErrno] ?? "System call failed"}\n`);
       return 0;
     }
 
@@ -1479,13 +1511,28 @@ export class CInterpreter {
     switch (name) {
       // string.h
       case "strlen": return toStr(args[0]).length;
-      case "strcpy": return this.assignTo(argExprs[0], fromString(toStr(args[1])));
-      case "strncpy": return this.assignTo(argExprs[0], fromString(toStr(args[1]).slice(0, n1)));
+      case "strcpy": case "strncpy": {
+        const text = toStr(args[1]);
+        const count = name === "strncpy" ? Math.max(0, toNum(args[2])) : text.length + 1;
+        // Mutate the pointed-to memory, preserving shared-memory aliases and
+        // fixed array capacity (strncpy's length is its THIRD argument).
+        if (isArray(args[0])) {
+          for (let i = 0; i < Math.min(count, args[0].__array.length); i++) args[0].__array[i] = text.charCodeAt(i) || 0;
+          return args[0];
+        }
+        return this.assignTo(argExprs[0], fromString(text.slice(0, count)));
+      }
       case "strcat": return this.assignTo(argExprs[0], fromString(toStr(args[0]) + toStr(args[1])));
       case "strcmp": return toStr(args[0]) < toStr(args[1]) ? -1 : toStr(args[0]) > toStr(args[1]) ? 1 : 0;
       case "strrev": return this.assignTo(argExprs[0], fromString([...toStr(args[0])].reverse().join("")));
       case "strcspn": { const s = toStr(args[0]); const reject = toStr(args[1]); let i = 0; while (i < s.length && !reject.includes(s[i])) i++; return i; }
-      case "memset": if (isArray(args[0])) { args[0].__array.fill(n1); } return args[0];
+      case "memset":
+        if (isArray(args[0])) args[0].__array.fill(n1, 0, toNum(args[2]));
+        else if (args[0]?.__struct === "sockaddr_un" && n1 === 0) {
+          args[0].sun_family = 0;
+          args[0].sun_path.__array.fill(0);
+        }
+        return args[0];
       // math.h
       case "sqrt": return Math.sqrt(n0); case "pow": return Math.pow(n0, n1);
       case "abs": case "fabs": return Math.abs(n0);

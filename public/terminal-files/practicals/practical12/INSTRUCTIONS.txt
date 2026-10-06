@@ -1,0 +1,16 @@
+PRACTICAL 12 - SYSTEM V SHARED MEMORY
+
+Run in one terminal pane:
+  cd ~/practicals/practical12
+  touch shmfile
+  gcc practical12.c -o practical12
+  ./practical12
+
+Expected output:
+  Child writing message to shared memory: Hello from child process!
+  Parent read message from shared memory: Hello from child process!
+
+The child writes into shared memory. The parent waits, reads the same memory,
+detaches, and removes the segment. You can run ./practical12 again.
+Keep shmfile in this directory: ftok needs an existing file to generate a key.
+The parent branch missing from the manual has been completed here.

@@ -1,0 +1,19 @@
+PRACTICAL 11 - UNIX DOMAIN SOCKETS
+
+Use two terminal panes on the same page (Split Terminal). Separate browser
+tabs do not share the simulated IPC runtime. Works in both terminal views.
+
+First pane:
+  cd ~/practicals/practical11
+  gcc server.c -o server
+  gcc client.c -o client
+  ./server
+
+After "Server is listening" appears, run in the second pane:
+  cd ~/practicals/practical11
+  ./client
+
+Server prints: Received from client: Hello from client!
+Client prints: Received from server: Hello from server!
+Both programs exit after one exchange. Start ./server again to repeat.
+Ctrl+C cancels a waiting server. The next server run removes the old socket.
