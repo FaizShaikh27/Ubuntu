@@ -1,0 +1,19 @@
+Aim 9: Accept a filename, check whether it exists, and display its read, write, and execute permissions.
+
+From your home directory:
+  bash ~/exam/09-file-permissions/solution.sh
+
+Read the code:
+  cat ~/exam/09-file-permissions/solution.sh
+
+Sample input (one value per prompt):
+  exam/09-file-permissions/solution.sh
+
+Expected result (apart from prompts):
+File exists: exam/09-file-permissions/solution.sh
+Read: yes
+Write: yes
+Execute: yes
+
+Paths are relative to your current terminal directory. The sample below assumes you start in ~.
+

@@ -1,0 +1,19 @@
+Aim 1: Accept a student's Name, PRN, and Division and display the student details.
+
+From your home directory:
+  bash ~/exam/01-student-details/solution.sh
+
+Read the code:
+  cat ~/exam/01-student-details/solution.sh
+
+Sample input (one value per prompt):
+  Asha Patil
+  001234
+  A
+
+Expected result (apart from prompts):
+Name: Asha Patil
+PRN: 001234
+Division: A
+
+

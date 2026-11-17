@@ -1,0 +1,15 @@
+Aim 16: Accept a character and check whether it is a vowel or consonant.
+
+From your home directory:
+  bash ~/exam/16-vowel-consonant/solution.sh
+
+Read the code:
+  cat ~/exam/16-vowel-consonant/solution.sh
+
+Sample input (one value per prompt):
+  A
+
+Expected result (apart from prompts):
+Vowel
+
+

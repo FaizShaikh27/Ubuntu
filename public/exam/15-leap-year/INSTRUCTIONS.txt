@@ -1,0 +1,17 @@
+Aim 15: Accept a year and check whether it is a leap year.
+
+From your home directory:
+  bash ~/exam/15-leap-year/solution.sh
+
+Read the code:
+  cat ~/exam/15-leap-year/solution.sh
+
+Sample input (one value per prompt):
+  2024
+
+Expected result (apart from prompts):
+Leap year
+
+Uses the Gregorian leap-year rule; accept years 1..9999.
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

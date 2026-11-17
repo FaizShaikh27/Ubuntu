@@ -1,0 +1,17 @@
+Aim 20: Accept a number and display its digits in reverse order.
+
+From your home directory:
+  bash ~/exam/20-reverse-number/solution.sh
+
+Read the code:
+  cat ~/exam/20-reverse-number/solution.sh
+
+Sample input (one value per prompt):
+  120
+
+Expected result (apart from prompts):
+Reversed: 021
+
+Reverse the digits of the magnitude, keeping the sign in front. Preserve zero digits: 120 becomes 021.
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

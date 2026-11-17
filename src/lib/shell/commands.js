@@ -226,7 +226,9 @@ export const commands = {
     const { flags, rest } = splitFlags(io.args.slice(1));
     const { text, error } = inputText(io, ctx, rest);
     if (error) { io.err(`wc: ${error}: No such file or directory\n`); return 1; }
-    const l = lines(text).length; const w = text.split(/\s+/).filter(Boolean).length; const c = text.length;
+    const l = (text.match(/\n/g) ?? []).length;
+    const w = text.split(/\s+/).filter(Boolean).length;
+    const c = flags.has("m") ? [...text].length : new TextEncoder().encode(text).length;
     const parts = [];
     if (flags.has("l")) parts.push(String(l));
     if (flags.has("w")) parts.push(String(w));
@@ -721,8 +723,10 @@ function runTest(args, ctx) {
       case "-f": return ok(node?.type === "file");
       case "-d": return ok(node?.type === "dir");
       case "-s": return ok(node?.type === "file" && node.content.length > 0);
-      case "-r": case "-w": return ok(!!node);
-      case "-x": return ok(!!node && (node.mode & 0o111) !== 0);
+      // VFS nodes belong to student; use the owner's permission bits.
+      case "-r": return ok(!!node && (node.mode & 0o400) !== 0);
+      case "-w": return ok(!!node && (node.mode & 0o200) !== 0);
+      case "-x": return ok(!!node && (node.mode & 0o100) !== 0);
       case "-z": return ok(target === "");
       case "-n": return ok(target !== "");
       default: return 1;

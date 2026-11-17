@@ -1,8 +1,8 @@
 /**
  * GET /api/terminal-files
  *
- * Reads the `public/terminal-files/` directory recursively and returns
- * the file tree as JSON. This is consumed by the VFS on the client to
+ * Reads `public/terminal-files/` and mounts `public/exam/` as `~/exam`.
+ * Returns the file tree as JSON. This is consumed by the VFS on the client to
  * inject teacher-provided files into every user's terminal automatically.
  *
  * Response shape:
@@ -19,7 +19,6 @@
  * }
  */
 
-import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
@@ -63,22 +62,11 @@ function readTree(absPath) {
 
 export async function GET() {
   const publicDir = path.join(process.cwd(), "public", "terminal-files");
+  const examDir = path.join(process.cwd(), "public", "exam");
+  const tree = fs.existsSync(publicDir) ? readTree(publicDir) : { type: "dir", children: {} };
+  if (fs.existsSync(examDir)) tree.children.exam = readTree(examDir);
 
-  if (!fs.existsSync(publicDir)) {
-    return NextResponse.json(
-      { type: "dir", children: {} },
-      {
-        headers: {
-          // Cache for 30 seconds so repeated page loads don't hammer the FS
-          "Cache-Control": "public, max-age=30, stale-while-revalidate=60",
-        },
-      },
-    );
-  }
-
-  const tree = readTree(publicDir);
-
-  return NextResponse.json(tree ?? { type: "dir", children: {} }, {
+  return Response.json(tree ?? { type: "dir", children: {} }, {
     headers: {
       "Cache-Control": "public, max-age=30, stale-while-revalidate=60",
     },

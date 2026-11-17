@@ -1,0 +1,17 @@
+Aim 10: Accept a number and sum all numbers from 1 up to that number using a loop.
+
+From your home directory:
+  bash ~/exam/10-sum-natural/solution.sh
+
+Read the code:
+  cat ~/exam/10-sum-natural/solution.sh
+
+Sample input (one value per prompt):
+  10
+
+Expected result (apart from prompts):
+Sum: 55
+
+Use 0..10000; zero produces an empty sum of 0.
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

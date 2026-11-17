@@ -1,0 +1,17 @@
+Aim 7: Accept a number and calculate its factorial using a loop.
+
+From your home directory:
+  bash ~/exam/07-factorial/solution.sh
+
+Read the code:
+  cat ~/exam/07-factorial/solution.sh
+
+Sample input (one value per prompt):
+  5
+
+Expected result (apart from prompts):
+Factorial: 120
+
+Input is limited to 0..18 so the browser shell's integer result stays exact. 0! = 1.
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

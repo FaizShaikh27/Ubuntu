@@ -1,0 +1,21 @@
+Aim 2: Accept two numbers and display their sum, difference, multiplication, and division.
+
+From your home directory:
+  bash ~/exam/02-arithmetic/solution.sh
+
+Read the code:
+  cat ~/exam/02-arithmetic/solution.sh
+
+Sample input (one value per prompt):
+  12
+  5
+
+Expected result (apart from prompts):
+Sum: 17
+Difference: 7
+Multiplication: 60
+Division (integer quotient): 2
+
+Division uses Bash integer arithmetic (truncation toward zero).
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

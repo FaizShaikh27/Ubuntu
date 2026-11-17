@@ -65,7 +65,11 @@ export function makeBinary(source) {
 }
 
 export async function runScript(source, io, ctx) {
-  const saved = { ...ctx.vars };
+  // A script's exit must end its shell without closing the terminal tab.
+  const parent = ctx;
+  ctx = { ...parent, vars: { ...parent.vars }, funcs: { ...parent.funcs },
+    aliases: { ...parent.aliases }, exported: new Set(parent.exported),
+    exiting: false, host: { ...parent.host, exit() {} } };
   io.args.slice(1).forEach((a, i) => (ctx.vars[String(i + 1)] = a));
   ctx.vars["#"] = String(io.args.length - 1);
   ctx.vars["@"] = io.args.slice(1).join(" ");
@@ -75,8 +79,6 @@ export async function runScript(source, io, ctx) {
   } catch (e) {
     io.err(`bash: ${e.message}\n`);
     return 2;
-  } finally {
-    ctx.vars = { ...saved };
   }
 }
 

@@ -479,7 +479,7 @@ async function expandCommandSub(body, ctx) {
   return buf.join("").replace(/\n+$/, "");
 }
 
-export async function expandWord(raw, ctx) {
+export async function expandWord(raw, ctx, { single = false } = {}) {
   let result = "";
   let quotedAnywhere = false;
   let i = 0;
@@ -578,7 +578,7 @@ export async function expandWord(raw, ctx) {
     i++;
   }
 
-  if (quotedAnywhere) return [result];
+  if (quotedAnywhere || single) return [result];
 
   const fields = result.split(/\s+/).filter((f) => f !== "");
   const out = [];
@@ -701,11 +701,14 @@ export async function execNode(node, ctx, sink) {
       return status;
     }
     case "case": {
-      const word = (await expandWord(node.word, ctx)).join(" ");
+      const word = (await expandWord(node.word, ctx, { single: true })).join(" ");
       for (const c of node.cases) {
         for (const pattern of c.patterns) {
-          const pat = (await expandWord(pattern, ctx)).join(" ") || pattern;
-          if (pat === "*" || matchGlob(pat, word)) return execNode(c.body, ctx, sink);
+          // Case matching does not perform pathname expansion or field splitting.
+          const pat = (await expandWord(pattern, ctx, { single: true })).join(" ");
+          // Quoting an entire case pattern makes its metacharacters literal.
+          const quoted = /^(['"])[\s\S]*\1$/.test(pattern);
+          if (quoted ? pat === word : matchGlob(pat, word)) return execNode(c.body, ctx, sink);
         }
       }
       return 0;

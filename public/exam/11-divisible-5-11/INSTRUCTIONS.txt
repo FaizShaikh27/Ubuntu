@@ -1,0 +1,16 @@
+Aim 11: Accept a number and check whether it is divisible by both 5 and 11.
+
+From your home directory:
+  bash ~/exam/11-divisible-5-11/solution.sh
+
+Read the code:
+  cat ~/exam/11-divisible-5-11/solution.sh
+
+Sample input (one value per prompt):
+  55
+
+Expected result (apart from prompts):
+Divisible by both 5 and 11
+
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

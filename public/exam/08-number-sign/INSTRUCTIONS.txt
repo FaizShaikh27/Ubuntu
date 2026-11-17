@@ -1,0 +1,16 @@
+Aim 8: Accept a number and check whether it is positive, negative, or zero.
+
+From your home directory:
+  bash ~/exam/08-number-sign/solution.sh
+
+Read the code:
+  cat ~/exam/08-number-sign/solution.sh
+
+Sample input (one value per prompt):
+  -7
+
+Expected result (apart from prompts):
+Negative
+
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

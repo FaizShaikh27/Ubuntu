@@ -1,0 +1,16 @@
+Aim 3: Accept a number and check whether it is even or odd.
+
+From your home directory:
+  bash ~/exam/03-even-odd/solution.sh
+
+Read the code:
+  cat ~/exam/03-even-odd/solution.sh
+
+Sample input (one value per prompt):
+  7
+
+Expected result (apart from prompts):
+Odd
+
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

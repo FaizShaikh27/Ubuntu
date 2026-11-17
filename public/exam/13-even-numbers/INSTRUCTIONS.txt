@@ -1,0 +1,22 @@
+Aim 13: Accept a number and display all even numbers from 1 up to it.
+
+From your home directory:
+  bash ~/exam/13-even-numbers/solution.sh
+
+Read the code:
+  cat ~/exam/13-even-numbers/solution.sh
+
+Sample input (one value per prompt):
+  10
+
+Expected result (apart from prompts):
+Even numbers:
+2
+4
+6
+8
+10
+
+Use 0..10000. For 0 or 1 there are no even numbers in the range.
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

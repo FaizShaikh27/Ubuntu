@@ -1,0 +1,17 @@
+Aim 14: Accept a number and calculate the sum of its digits.
+
+From your home directory:
+  bash ~/exam/14-digit-sum/solution.sh
+
+Read the code:
+  cat ~/exam/14-digit-sum/solution.sh
+
+Sample input (one value per prompt):
+  12345
+
+Expected result (apart from prompts):
+Sum of digits: 15
+
+For negative numbers, sum the digits of the magnitude.
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

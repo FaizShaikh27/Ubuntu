@@ -1,0 +1,18 @@
+Aim 6: Accept three numbers and display the largest.
+
+From your home directory:
+  bash ~/exam/06-largest-number/solution.sh
+
+Read the code:
+  cat ~/exam/06-largest-number/solution.sh
+
+Sample input (one value per prompt):
+  4
+  9
+  2
+
+Expected result (apart from prompts):
+Largest: 9
+
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

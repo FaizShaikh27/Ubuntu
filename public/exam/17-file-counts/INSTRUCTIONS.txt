@@ -1,0 +1,19 @@
+Aim 17: Accept a filename and display its number of lines, words, and characters.
+
+From your home directory:
+  bash ~/exam/17-file-counts/solution.sh
+
+Read the code:
+  cat ~/exam/17-file-counts/solution.sh
+
+Sample input (one value per prompt):
+  exam/17-file-counts/sample.txt
+
+Expected result (apart from prompts):
+Lines: 2
+Words: 5
+Characters: 27
+
+Paths are relative to the current terminal directory. The sample assumes ~.
+wc -l counts newline characters; an unterminated final line does not add a newline. wc -m counts characters, including spaces and newlines.
+

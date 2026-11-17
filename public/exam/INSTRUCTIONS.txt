@@ -1,0 +1,41 @@
+SHELL SCRIPTING PRACTICALS - 20 SOLUTIONS
+
+Open the terminal and run:
+  ls ~/exam
+  cat ~/exam/01-student-details/INSTRUCTIONS.txt
+  bash ~/exam/01-student-details/solution.sh
+
+Each directory contains a standalone solution.sh and INSTRUCTIONS.txt with
+its aim, run command, sample input, expected output, and any input limits.
+You can also use cd ~/exam/<directory> followed by ./solution.sh.
+All solutions run in this site's cached virtual shell. No apt, Python,
+bc, compiler, or external package installation is required.
+
+Numeric inputs are integers without leading zeros (PRN is kept as text).
+Arithmetic and calculator division return the Bash integer quotient.
+The five-number average displays its exact decimal result.
+Most numeric exercises accept -1000000..1000000; individual prompts
+state narrower limits. Factorial is limited to 18 for exact browser
+integer results. Sum and even-number loops accept 0..10000.
+
+01-student-details: Accept a student's Name, PRN, and Division and display the student details.
+02-arithmetic: Accept two numbers and display their sum, difference, multiplication, and division.
+03-even-odd: Accept a number and check whether it is even or odd.
+04-pass-fail: Accept marks and display Pass for marks of 40 or above; otherwise display Fail.
+05-multiplication-table: Accept a number and display its multiplication table from 1 to 10.
+06-largest-number: Accept three numbers and display the largest.
+07-factorial: Accept a number and calculate its factorial using a loop.
+08-number-sign: Accept a number and check whether it is positive, negative, or zero.
+09-file-permissions: Accept a filename, check whether it exists, and display its read, write, and execute permissions.
+10-sum-natural: Accept a number and sum all numbers from 1 up to that number using a loop.
+11-divisible-5-11: Accept a number and check whether it is divisible by both 5 and 11.
+12-calculator: Accept two numbers and an operator (+, -, *, /) and perform the selected operation.
+13-even-numbers: Accept a number and display all even numbers from 1 up to it.
+14-digit-sum: Accept a number and calculate the sum of its digits.
+15-leap-year: Accept a year and check whether it is a leap year.
+16-vowel-consonant: Accept a character and check whether it is a vowel or consonant.
+17-file-counts: Accept a filename and display its number of lines, words, and characters.
+18-directory-exists: Accept a directory name and check whether it exists.
+19-total-average: Accept five numbers and calculate their total and average.
+20-reverse-number: Accept a number and display its digits in reverse order.
+

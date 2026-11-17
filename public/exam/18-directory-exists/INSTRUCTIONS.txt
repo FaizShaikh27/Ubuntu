@@ -1,0 +1,16 @@
+Aim 18: Accept a directory name and check whether it exists.
+
+From your home directory:
+  bash ~/exam/18-directory-exists/solution.sh
+
+Read the code:
+  cat ~/exam/18-directory-exists/solution.sh
+
+Sample input (one value per prompt):
+  exam
+
+Expected result (apart from prompts):
+Directory exists: exam
+
+Paths are relative to your current terminal directory. The sample assumes ~.
+

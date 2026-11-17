@@ -1,0 +1,19 @@
+Aim 12: Accept two numbers and an operator (+, -, *, /) and perform the selected operation.
+
+From your home directory:
+  bash ~/exam/12-calculator/solution.sh
+
+Read the code:
+  cat ~/exam/12-calculator/solution.sh
+
+Sample input (one value per prompt):
+  12
+  5
+  *
+
+Expected result (apart from prompts):
+Result: 60
+
+Division uses Bash integer arithmetic (truncation toward zero). Enter the operator by itself.
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

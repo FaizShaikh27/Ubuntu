@@ -1,0 +1,16 @@
+Aim 4: Accept marks and display Pass for marks of 40 or above; otherwise display Fail.
+
+From your home directory:
+  bash ~/exam/04-pass-fail/solution.sh
+
+Read the code:
+  cat ~/exam/04-pass-fail/solution.sh
+
+Sample input (one value per prompt):
+  40
+
+Expected result (apart from prompts):
+Pass
+
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+

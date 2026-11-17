@@ -1,0 +1,22 @@
+Aim 19: Accept five numbers and calculate their total and average.
+
+From your home directory:
+  bash ~/exam/19-total-average/solution.sh
+
+Read the code:
+  cat ~/exam/19-total-average/solution.sh
+
+Sample input (one value per prompt):
+  1
+  2
+  3
+  4
+  6
+
+Expected result (apart from prompts):
+Total: 16
+Average: 3.2
+
+Accept five integers, one at each prompt. The average includes its exact fractional part.
+Numeric inputs are whole integers without leading zeros; the script checks its supported range.
+
