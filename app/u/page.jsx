@@ -61,6 +61,7 @@ function TerminalWorkspace() {
             : "Single terminal — click Split to open a second terminal side-by-side."}
         </p>
         <div className="flex-center-gap-2">
+          {/* Lab Manual button disabled.
           <a
             href="/Operating_System_Lab_Manual.pdf"
             target="_blank"
@@ -71,6 +72,7 @@ function TerminalWorkspace() {
             <BookIcon className="size-4" />
             Lab Manual
           </a>
+          */}
           {/* Screenshot button temporarily disabled.
           <button
             type="button"
@@ -178,6 +180,7 @@ function SplitIcon({ className = "" }) {
   );
 }
 
+/* Icon for the disabled Lab Manual button.
 function BookIcon({ className = "" }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
@@ -186,6 +189,7 @@ function BookIcon({ className = "" }) {
     </svg>
   );
 }
+*/
 
 function CameraIcon({ className = "" }) {
   return (
